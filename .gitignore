@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 本地配置与密钥（绝不提交！）
+.env
+.env.*
+!.env.example
+config.json
+*.log
+
+# 密钥与本地数据（API Key 加密存储、翻译记忆库、短语收藏）
+# 这些一旦提交会把 Key 或私人翻译记录推到远端，必须拦截。
+secrets.json
+memory.db
+memory.db-wal
+memory.db-shm
+*.sqlite
+*.sqlite3
+phrases.json
+history.jsonl
+
+# 打包产物与解包临时目录
+*.exe
+*.pyd
+_MEI*/
+build_onefile.spec
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp

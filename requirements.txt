@@ -1,0 +1,10 @@
+# 全球通（QuanQiuTong）—— 运行依赖
+# 安装：pip install -r requirements.txt
+
+PySide6>=6.6          # 桌面界面（Qt）
+openai>=1.40,<3       # OpenAI 兼容 API 客户端（本项目在 2.x 下开发与测试）
+python-dotenv>=1.0    # .env 文件加载（本地开发）
+
+# ---- 开发/测试依赖（可选） ----
+# pytest>=8.0
+# pyinstaller>=6.6

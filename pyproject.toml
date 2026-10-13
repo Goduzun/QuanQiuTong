@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quanqiutong-cs2"
+version = "1.1.0"
+description = "全球通（QuanQiuTong）—— CS2 实时聊天中文翻译助手（只读日志 + 在线 AI 翻译，不注入、不 Hook、不修改游戏文件）"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Goduzun" }]
+keywords = ["cs2", "counter-strike", "translation", "pyside6", "openai"]
+
+dependencies = [
+    "PySide6>=6.6",
+    "openai>=1.40,<3",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pyinstaller>=6.6",
+]
+
+[project.scripts]
+cs2-translator = "cs2_translator.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
