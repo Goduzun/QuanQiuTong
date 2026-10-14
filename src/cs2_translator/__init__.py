@@ -19,7 +19,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 # APP_NAME 用于数据目录（%APPDATA%\CS2ChatTranslator）与内部标识。
 # 刻意与对外显示名解耦：改名不会导致既有配置、翻译记忆与术语库搬家。
 # ⚠ 绝对不要因为「改产品名」就改这个值 —— 那会让使用者的

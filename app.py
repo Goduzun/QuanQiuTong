@@ -73,12 +73,46 @@ def _make_config_manager(args) -> ConfigManager:
 
 
 # ---------------------------------------------------------------- 诊断模式
+def _check_runtime_deps() -> list:
+    """檢查打包後容易缺失的執行期依賴。
+
+    為什麼要檢查：PyInstaller 打包時若誤刪 OpenSSL DLL，_ssl 會載入失敗，
+    openai 庫隨之無法 import，翻譯功能全廢 —— 而 GUI 上只會顯示一行
+    「openai 库不可用」，使用者難以判斷原因。這裡主動檢查並給出可行動的訊息。
+
+    回傳 [(名稱, 是否可用, 說明)]。
+    """
+    results = []
+
+    # 1) _ssl / OpenSSL —— openai 走 HTTPS 的必要條件
+    try:
+        import ssl
+
+        results.append(("ssl", True, ssl.OPENSSL_VERSION))
+    except Exception as exc:  # noqa: BLE001
+        results.append(("ssl", False, f"{type(exc).__name__}: {exc}"))
+
+    # 2) openai —— 翻譯 API 客戶端
+    try:
+        import openai
+
+        results.append(("openai", True, getattr(openai, "__version__", "?")))
+    except Exception as exc:  # noqa: BLE001
+        results.append(("openai", False, f"{type(exc).__name__}: {exc}"))
+
+    return results
+
+
 def _run_diagnose(path: str) -> int:
     target = Path(path)
     if not target.is_file():
         print(f"文件不存在: {target}")
         return 2
     print(f"正在本地分析日志: {target}（仅读取，不上传任何内容）")
+    print("\n==== 运行环璄自检 ====")
+    for name, ok, detail in _check_runtime_deps():
+        mark = "OK" if ok else "缺失"
+        print(f"  {name}: {mark}  {detail}")
     try:
         data = target.read_bytes()
     except OSError as exc:
@@ -104,6 +138,15 @@ def _run_diagnose(path: str) -> int:
         print(
             "\n提示: 未识别到聊天消息。请确认 CS2 启动参数包含 -condebug，"
             "且游戏内确有聊天发生；若日志格式与预期不同，可在设置中添加自定义正则。"
+        )
+    # 依賴缺失時給出可行動的修復方向（而不是只說「不可用」）
+    broken = [name for name, ok, _ in _check_runtime_deps() if not ok]
+    if broken:
+        print(
+            f"\n⚠ 執行期依賴缺失: {', '.join(broken)}"
+            "\n  這通常是打包時誤刪了 OpenSSL DLL 造成的。"
+            "\n  修復: 重新打包時不要排除 libssl-1_1.dll / libcrypto-1_1.dll"
+            "（Python 3.11 的 _ssl.pyd 直接依賴它們）。"
         )
     return 0
 

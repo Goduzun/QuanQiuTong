@@ -14,8 +14,9 @@
 #                                 d3d11/dxgi/d3d12（走系统 Direct3D）
 #   2. Qt6Quick/Qml/... 12.55 MB  QML 全家桶，本程式纯 QWidget
 #   3. Qt6Pdf            4.41 MB  PDF 模组，未使用
-#   4. libcrypto/ssl-1_1 3.96 MB  Python 3.11 的 ssl 用自带的 OpenSSL 3.x，
-#                                 这是旧版残留
+#   4. libcrypto/ssl-1_1 ❌ 不可移除！Python 3.11 的 _ssl.pyd 直接汇入它们
+#                                 （实测 PE 汇入表，版本 OpenSSL 1.1.1u）；
+#                                 移除后 openai 无法 import，翻译功能全废
 #   5. translations      6.56 MB  99 个语言档只留 zh_CN
 #   6. Qt6OpenGL/Network 3.60 MB  仅被 Quick/Pdf/Qml 依赖，全都移除
 #   7. 多余外挂          3.30 MB  imageformats/platforms/tls 只留必需
@@ -66,7 +67,11 @@ BINARY_DROP = (
     "Qt6Positioning", "Qt6SerialPort", "Qt6Sql", "Qt6Test", "Qt6Help",
     "Qt6Sensors", "Qt6SerialBus", "Qt6RemoteObjects", "Qt6Scxml",
     "Qt6SpatialAudio", "Qt6TextToSpeech", "Qt6HttpServer", "Qt6UiTools",
-    "libcrypto-1_1", "libssl-1_1",
+    # ⚠ 绝不可排除 libcrypto-1_1 / libssl-1_1！
+    #   Python 3.11 的 _ssl.pyd 直接汇入这两个（实测 PE 汇入表：
+    #   C:\python\DLLs\_ssl.pyd -> libcrypto-1_1.dll, libssl-1_1.dll，
+    #   版本 OpenSSL 1.1.1u）。一旦移除，_ssl 载入失败，
+    #   openai 库无法 import，翻译功能全废（真实踩过的坑）。
     "qopensslbackend", "qschannelbackend", "qcertonlybackend", "qnetworklistmanager",
     "qminimal", "qoffscreen", "qdirect2d",
     "qtiff", "qwebp", "qicns", "qtga", "qwbmp", "qpdf", "qgif",

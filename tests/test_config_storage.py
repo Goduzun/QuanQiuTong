@@ -11,10 +11,62 @@ import pytest
 from cs2_translator.config import AppConfig, ConfigManager, user_data_dir
 from cs2_translator.storage import SecretStore, atomic_write_json
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 @pytest.fixture
 def config_manager(tmp_path):
     return ConfigManager(data_dir=tmp_path / "data")
+
+
+class TestPackagingSpec:
+    """打包 spec 的回歸保護。
+
+    真實事故：瘦身時把 libssl-1_1.dll / libcrypto-1_1.dll 列入排除清單，
+    誤以為「Python 3.11 的 ssl 使用自帶 OpenSSL 3.x」。實際上這個 Python
+    的 _ssl.pyd 直接匯入 libcrypto-1_1/libssl-1_1（OpenSSL 1.1.1u），
+    排除後 _ssl 載入失敗 → openai 無法 import → 翻譯功能全廢，
+    GUI 只顯示一行「openai 库不可用: DLL load failed while importing _ssl」。
+    因此這裡鎖住：關鍵 OpenSSL DLL 絕不可出現在排除清單裡。
+    """
+
+    # 這些 DLL 是執行期必須，任何 spec 都不得排除
+    MUST_NOT_DROP = ("libssl-1_1", "libcrypto-1_1")
+
+    @staticmethod
+    def _spec_text() -> str:
+        spec = PROJECT_ROOT / "QuanQiuTong-onefile.spec"
+        assert spec.is_file(), f"找不到 {spec}"
+        return spec.read_text(encoding="utf-8")
+
+    def test_spec_does_not_exclude_openssl_dlls(self):
+        text = self._spec_text()
+        for must in self.MUST_NOT_DROP:
+            # 檢查是否被當成排除項寫進 BINARY_DROP（用引號包住的字串）
+            banned = f'"{must}"'
+            assert banned not in text, (
+                f"spec 的排除清單含 {must}！Python 的 _ssl.pyd 依賴它，"
+                f"排除後 openai 無法使用。"
+            )
+
+    def test_spec_explains_the_pitfall(self):
+        """排除清單旁必須留有警告，避免後人重犯。"""
+        text = self._spec_text()
+        assert "绝不可排除" in text or "不可移除" in text, \
+            "spec 應保留「不可排除 OpenSSL」的警告註解"
+
+    def test_spec_keeps_required_qt_modules(self):
+        """必用的 Qt 模組不得被排除。"""
+        text = self._spec_text()
+        for must in ("QtCore", "QtGui", "QtWidgets"):
+            assert f'"PySide6.{must}"' not in text, f"{must} 是必需模組，不該被排除"
+
+    def test_diagnose_self_check_covers_deps(self):
+        """app.py 的 --diagnose 必須自檢 ssl 與 openai。"""
+        app = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")
+        assert "_check_runtime_deps" in app, "app.py 應提供執行期依賴自檢"
+        assert "import ssl" in app and "import openai" in app, \
+            "自檢應涵蓋 ssl 與 openai"
 
 
 class TestDataDirStability:
