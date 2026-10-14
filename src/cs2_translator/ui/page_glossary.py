@@ -134,6 +134,12 @@ class GlossaryPage(QWidget):
         ))
 
     # ------------------------------------------------------------------
+    def stop_timers(self) -> None:
+        """停止延迟定时器（关闭窗口时由外壳调用，避免关闭后仍触发查询）。"""
+        timer = getattr(self, "_search_timer", None)
+        if timer is not None:
+            timer.stop()
+
     def _on_search_changed(self, _text: str) -> None:
         """搜尋框輸入：延遲 180ms 再查詢，避免每個按鍵都重建表格。"""
         self._search_timer.start(180)
@@ -173,8 +179,11 @@ class GlossaryPage(QWidget):
         self.table.setVisible(has_rows)
         self.empty_state.setVisible(not has_rows)
         if has_rows:
-            # 只做一次欄寬計算，而不是每個 cell 一次
-            self.table.resizeColumnsToContents()
+            # 只调整 ResizeToContents 的栏（2~5），不要用 resizeColumnsToContents()：
+            # 那个方法会连 Stretch 栏(0,1) 一起按内容宽度设置，
+            # 结果 6 栏合计只有 ~480 px，右边留下 600+ px 空白（「排版很空」的真因）。
+            for c in range(2, self.table.columnCount()):
+                self.table.resizeColumnToContents(c)
 
         self._refresh_stats(memory)
 

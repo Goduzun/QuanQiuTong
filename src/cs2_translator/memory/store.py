@@ -708,6 +708,11 @@ class TranslationMemory:
         params.append(limit)
         return [dict(row) for row in self.db.query_all(sql, tuple(params))]
 
+    def template_count(self) -> int:
+        """回傳句式模板總數（SQL 聚合，避免撈出全部再算長度）。"""
+        row = self.db.query_one("SELECT COUNT(*) AS n FROM translation_templates")
+        return int(row["n"]) if row else 0
+
     def _confirmed_templates(
         self, target: str, direction: str
     ) -> list[CompiledTemplate]:

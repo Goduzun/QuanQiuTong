@@ -181,6 +181,9 @@ class Database:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        # 关闭旗标：关闭后所有查询回传空结果，避免界面定时器在收尾阶段
+        # 撞上已关闭的连接而抛 sqlite3.ProgrammingError
+        self._closed = False
         self._conn = sqlite3.connect(
             str(self.path), check_same_thread=False, timeout=10.0, isolation_level=None
         )
@@ -226,6 +229,8 @@ class Database:
     def transaction(self):
         """原子事务上下文（隔离级别为 autocommit，手动 BEGIN）。"""
         with self._lock:
+            if self._closed:
+                raise sqlite3.ProgrammingError("数据库已关闭")
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 yield self._conn
@@ -245,15 +250,35 @@ class Database:
             return self._conn.execute(sql, tuple(params))
 
     def query_all(self, sql: str, params: Iterable = ()) -> list[sqlite3.Row]:
+        """查询多行。数据库已关闭时回传空清单，而不是抛例外。
+
+        为什么需要这样：关闭窗口时引擎会关掉数据库，但界面上仍有
+        定时器（状态刷新）与分页的延迟搜寻计时器可能刚好在此时触发，
+        对已关闭的连接查询会抛 sqlite3.ProgrammingError
+        （_threads can only be started once_ 那类竞态）。
+        资料层直接回传空结果，比让每个呼叫端各自 try/except 更稳。
+        """
         with self._lock:
+            if self._closed:
+                return []
             return list(self._conn.execute(sql, tuple(params)).fetchall())
 
     def query_one(self, sql: str, params: Iterable = ()):
+        """查询单行。数据库已关闭时回传 None（理由见 query_all）。"""
         with self._lock:
+            if self._closed:
+                return None
             return self._conn.execute(sql, tuple(params)).fetchone()
+
+    def is_closed(self) -> bool:
+        """数据库是否已关闭（供界面在关闭流程中提前停止刷新）。"""
+        return self._closed
 
     def close(self) -> None:
         with self._lock:
+            if self._closed:
+                return
+            self._closed = True
             try:
                 self._conn.close()
             except sqlite3.Error:

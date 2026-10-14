@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -55,6 +55,10 @@ class MemoryPage(QWidget):
         self.context = context
         self._rows: list[dict] = []
         self._confirmed_only = False
+        # 搜寻输入的防抖计时器（单次触发）
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.timeout.connect(self.reload)
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -102,7 +106,8 @@ class MemoryPage(QWidget):
         self.search_edit.setPlaceholderText("搜索原文或译文…")
         self.search_edit.setMaximumWidth(240)
         self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.textChanged.connect(self.reload)
+        # 输入时延迟再查询，避免每个按键都重建整张表（词汇表页同样的坑）
+        self.search_edit.textChanged.connect(self._on_search_changed)
         head.addWidget(self.search_edit)
 
         self.confirmed_button = QPushButton("仅看人工确认")
@@ -145,7 +150,20 @@ class MemoryPage(QWidget):
         self._confirmed_only = bool(checked)
         self.reload()
 
+    def stop_timers(self) -> None:
+        """停止延迟定时器（关闭窗口时由外壳调用，避免关闭后仍触发查询）。"""
+        timer = getattr(self, "_search_timer", None)
+        if timer is not None:
+            timer.stop()
+
     def reload(self) -> None:
+        """重建翻译记忆表格。
+
+        效能关键（与词汇表页同一个坑）：栏位用 ResizeToContents 时，Qt 会在
+        **每次** setItem 后重算栏宽，1000 列 × 7 栏就退化成 O(n²)。
+        解法：重建期间隐藏表格，填完再显示，并且只呼叫一次
+        resizeColumnsToContents()。实测同份资料由数秒降到数十毫秒。
+        """
         memory = self.context.memory
         if memory is None:
             return
@@ -161,29 +179,60 @@ class MemoryPage(QWidget):
             logger.exception("读取翻译记忆失败")
             self._rows = []
 
-        self.table.setRowCount(len(self._rows))
-        for r, entry in enumerate(self._rows):
-            values = [
-                entry.get("original_source", ""),
-                entry.get("translated_text", ""),
-                _DIRECTION_LABELS.get(entry.get("direction", ""), entry.get("direction", "")),
-                entry.get("target_language", ""),
-                "人工修正" if entry.get("confirmed") else "在线 API",
-                str(entry.get("hit_count", 0)),
-                format_datetime(entry.get("updated_at", "")),
-            ]
-            for c, text in enumerate(values):
-                item = QTableWidgetItem(str(text))
-                if c in (4, 5):
-                    item.setTextAlignment(Qt.AlignCenter)
-                if c == 0:
-                    item.setData(Qt.UserRole, entry.get("id"))
-                self.table.setItem(r, c, item)
+        self._fill_table(self._rows)
 
         has_rows = bool(self._rows)
         self.table.setVisible(has_rows)
         self.empty_state.setVisible(not has_rows)
+        if has_rows:
+            # 只调整 ResizeToContents 的栏（2~6）。
+            # 不要用 resizeColumnsToContents()：它会连 Stretch 栏(0,1) 一起
+            # 按内容宽度设置，导致表格右侧留下大片空白（「排版很空」的真因）。
+            for c in range(2, self.table.columnCount()):
+                self.table.resizeColumnToContents(c)
         self._reload_stats()
+
+    def _on_search_changed(self, _text: str) -> None:
+        """搜寻框输入：延迟 180ms 再查询。
+
+        用 QTimer 做防抖，避免使用者每敲一个字就重建 1000 列的表格
+        （timer 在 _build_ui 建立；没有就退回直接重建）。
+        """
+        timer = getattr(self, "_search_timer", None)
+        if timer is None:
+            self.reload()
+            return
+        timer.start(180)
+
+    def _fill_table(self, rows: list) -> None:
+        """把资料填进表格（重建期间隐藏，避开 O(n²) 栏宽重算）。"""
+        table = self.table
+        was_visible = table.isVisible()
+        if was_visible:
+            table.setVisible(False)
+        try:
+            table.setRowCount(len(rows))
+            for r, entry in enumerate(rows):
+                values = [
+                    entry.get("original_source", ""),
+                    entry.get("translated_text", ""),
+                    _DIRECTION_LABELS.get(entry.get("direction", ""),
+                                          entry.get("direction", "")),
+                    entry.get("target_language", ""),
+                    "人工修正" if entry.get("confirmed") else "在线 API",
+                    str(entry.get("hit_count", 0)),
+                    format_datetime(entry.get("updated_at", "")),
+                ]
+                for c, text in enumerate(values):
+                    item = QTableWidgetItem(str(text))
+                    if c in (4, 5):
+                        item.setTextAlignment(Qt.AlignCenter)
+                    if c == 0:
+                        item.setData(Qt.UserRole, entry.get("id"))
+                    table.setItem(r, c, item)
+        finally:
+            if was_visible:
+                table.setVisible(True)
 
     def _reload_stats(self) -> None:
         memory = self.context.memory
@@ -204,11 +253,15 @@ class MemoryPage(QWidget):
         self.stats.set_value("hit_rate", f"{stats.get('cache_hit_rate', 0.0) * 100:.0f}%")
         self.stats.set_value("saved", stats.get("saved_requests", 0))
 
+        # 用 SQL 聚合取数量，不要 list_terms(limit=100000) 捞进 Python 数长度
         try:
-            terms = len(memory.list_terms(limit=100000))
-            templates = len(memory.list_templates(limit=100000))
+            terms = memory.term_stats().get("total", 0)
         except Exception:
-            terms = templates = "?"
+            terms = len(memory.list_terms(limit=100000))
+        try:
+            templates = memory.template_count()
+        except Exception:
+            templates = len(memory.list_templates(limit=100000))
         savings = stats.get("estimated_savings")
         extra = f"术语 {terms} 条 · 句式模板 {templates} 条"
         if savings is not None:

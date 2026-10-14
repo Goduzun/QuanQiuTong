@@ -103,6 +103,10 @@ class MainWindow(QMainWindow):
 
         self._switch_page("live")
         self._refresh_status()
+        # 启动后自动测一次 API（已有 key 才测）
+        self._schedule_startup_api_check()
+        # 启动后检查更新（可在设置里关闭）
+        self._schedule_update_check()
 
     # ==================================================================
     # 外壳构建
@@ -353,6 +357,52 @@ class MainWindow(QMainWindow):
         signals.api_test_done.connect(self._on_api_test_done)
         signals.log_test_done.connect(self._on_log_test_done)
         signals.match_changed.connect(self._on_match_changed)
+
+    def _schedule_startup_api_check(self) -> None:
+        """启动后自动测试一次 API，让状态栏的「API 未测试」自己变成结果。
+
+        为什么：状态栏一直显示「API 未测试」没有意义 —— 使用者得手动去设置页
+        点一次才知道 API 到底通不通。改成启动后延迟自动测一次，结果直接反映在
+        状态栏与设置页；之后仍可在设置页手动重测。
+        延迟 1.5 秒是为了让主窗口先画出来，不让网络请求卡住启动。
+        """
+        if not getattr(self.config, "api_key", ""):
+            return
+        QTimer.singleShot(1500, self._auto_check_api)
+
+    def _auto_check_api(self) -> None:
+        try:
+            self.controller.test_api()
+        except Exception:
+            logger.exception("启动自动测试 API 失败")
+
+    def _schedule_update_check(self) -> None:
+        """启动后检查是否有新版本（可在设置里关闭）。
+
+        隐私：只读 GitHub 公开的 Release 版本号，不发送任何本地资料。
+        关闭 config.check_updates 后，程式完全不连 GitHub。
+        """
+        if not bool(getattr(self.config, "check_updates", True)):
+            return
+        try:
+            from .. import __version__
+            from ..update_check import UpdateCheckWorker
+
+            self._update_worker = UpdateCheckWorker(__version__, self)
+            self._update_worker.finished_check.connect(self._on_update_checked)
+            self._update_worker.start()
+        except Exception:
+            logger.exception("启动检查更新失败")
+
+    def _on_update_checked(self, has_new: bool, version: str, page: str) -> None:
+        if not has_new:
+            return
+        self.statusBar().showMessage(
+            f"发现新版本 v{version}（当前 {__import__('cs2_translator').__version__}）"
+            f" · 下载：{page}",
+            20000,
+        )
+        logger.info("发现新版本 v%s，下载页 %s", version, page)
 
     def _on_match_changed(self, info: dict) -> None:
         """对局切换（含自动识别）时清空消息流并提示。
@@ -795,6 +845,23 @@ class MainWindow(QMainWindow):
 
     def _shutdown(self) -> None:
         self._status_timer.stop()
+        # 停止各页面的延迟定时器（搜寻防抖等）。
+        # 否则它们可能在引擎关闭后触发，对已关闭的数据库查询。
+        for page in getattr(self, "pages", {}).values():
+            stopper = getattr(page, "stop_timers", None)
+            if callable(stopper):
+                try:
+                    stopper()
+                except Exception:
+                    logger.exception("停止页面定时器失败")
+        # 等待检查更新的后台线程结束（否则 Qt 会警告线程仍在使用中）
+        worker = getattr(self, "_update_worker", None)
+        if worker is not None and worker.isRunning():
+            try:
+                worker.quit()
+                worker.wait(3000)
+            except Exception:
+                logger.exception("等待更新检查线程结束失败")
         # 结束当前对局，保证历史对局的 ended_at 被正确写入
         try:
             if self.context.matches is not None:

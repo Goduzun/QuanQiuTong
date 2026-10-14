@@ -474,54 +474,65 @@ class TestReplyThreeStates:
         win.show()
         return win
 
-    def test_states_progress_and_never_claim_sent_early(self, qapp, tmp_path):
+    def test_success_auto_copies_and_never_claims_sent(self, qapp, tmp_path):
+        """翻譯成功自動複製；狀態只到「已複製」，**永不聲稱已發送**。
+
+        設計邏輯（使用者指定）：翻譯出來 → 自動複製 → 進遊戲 Ctrl+V 粘貼。
+        因此沒有「我已發送」確認框，狀態提示也不得提「已發送／已確認」，
+        避免讓人誤以為程式會自動發送。
+        """
         win = self._window(qapp, tmp_path)
         try:
             live = win.live_page
             assert live._reply_state == "pending"
 
+            copied = []
+            live.copy_requested.connect(copied.append)
             live.show_reply_result({"ok": True, "translated": "Rush B",
                                     "hit_kind": "api", "latency_ms": 10.0})
-            assert live._reply_state == "generated"
-            assert "已生成" in live.state_label.text()
-            assert "已发送" not in live.state_label.text()
-
-            live.mark_copied()
+            assert copied == ["Rush B"], "翻譯成功必須自動複製"
             assert live._reply_state == "copied"
-            assert "已复制" in live.state_label.text()
-            # 复制不等于发送
-            assert "已确认" not in live.state_label.text()
 
-            live.send_button.setChecked(True)
-            assert live._reply_state == "sent"
-            assert "已确认" in live.state_label.text()
+            text = live.state_label.text()
+            assert "已复制" in text
+            # 絕不可聲稱已發送
+            assert "已发送" not in text and "已确认" not in text
+            # 必須提示使用者自己去粘貼
+            assert "Ctrl+V" in text or "粘贴" in text
         finally:
             win._really_quit = True
             win.close()
 
-    def test_cancelling_confirm_reverts_sent(self, qapp, tmp_path):
+    def test_retranslate_auto_copies_again(self, qapp, tmp_path):
+        """重新翻譯會再次自動複製，並覆蓋前一版。"""
         win = self._window(qapp, tmp_path)
         try:
             live = win.live_page
+            copied = []
+            live.copy_requested.connect(copied.append)
             live.show_reply_result({"ok": True, "translated": "go mid"})
-            live.mark_copied()
-            live.send_button.setChecked(True)
-            assert live._reply_state == "sent"
-            live.send_button.setChecked(False)
-            # 取消后不得保留虚假的已发送状态
+            live.show_reply_result({"ok": True, "translated": "hold the angle"})
+            assert copied == ["go mid", "hold the angle"]
             assert live._reply_state == "copied"
+            assert live.reply_result_label.text() == "hold the angle"
         finally:
             win._really_quit = True
             win.close()
 
-    def test_failure_resets_to_pending(self, qapp, tmp_path):
+    def test_failure_sets_failed_state(self, qapp, tmp_path):
+        """失敗時狀態為 failed（不是 pending），且必須明確顯示失敗。
+
+        舊版把失敗退回 pending，會讓使用者分不清「還沒開始」與「剛剛失敗了」。
+        """
         win = self._window(qapp, tmp_path)
         try:
             live = win.live_page
             live.show_reply_result({"ok": True, "translated": "x"})
             live.show_reply_result({"ok": False, "error": "网络断开"})
-            assert live._reply_state == "pending"
-            assert "失败" in live.reply_status.text()
+            assert live._reply_state == "failed"
+            assert "失败" in live.state_label.text()
+            # 草稿必須保留，讓使用者可直接重試
+            assert "草稿已保留" in live.state_label.text()
         finally:
             win._really_quit = True
             win.close()

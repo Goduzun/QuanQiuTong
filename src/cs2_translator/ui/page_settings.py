@@ -100,7 +100,7 @@ class SettingsPage(QWidget):
     # ---- A. 翻译 API ----
     def _section_api(self) -> QWidget:
         card = Card()
-        card.add(section_title("A. 翻译 API"))
+        card.add(section_title("翻译 API"))
         card.add(hint_label(
             "支持 OpenAI 官方或任意兼容接口。API Key 在 Windows 上使用 DPAPI 加密存储，"
             "不会以明文写入配置文件。"
@@ -162,7 +162,7 @@ class SettingsPage(QWidget):
     # ---- B. 语言设置 ----
     def _section_language(self) -> QWidget:
         card = Card()
-        card.add(section_title("B. 语言设置"))
+        card.add(section_title("语言设置"))
         card.add(hint_label(
             "源语言默认自动检测。目标语言变化会影响缓存键，因此中→外与外语→中分别缓存，互不串用。"
         ))
@@ -205,7 +205,7 @@ class SettingsPage(QWidget):
     # ---- C. 日志读取 ----
     def _section_log(self) -> QWidget:
         card = Card()
-        card.add(section_title("C. 日志读取"))
+        card.add(section_title("日志读取"))
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setSpacing(8)
@@ -240,7 +240,7 @@ class SettingsPage(QWidget):
     # ---- D. 记录与缓存 ----
     def _section_data(self) -> QWidget:
         card = Card()
-        card.add(section_title("D. 记录与缓存"))
+        card.add(section_title("记录与缓存"))
         card.add(hint_label(
             "三层数据严格隔离：① 当前局消息（界面显示）② 历史对局（可清理）"
             "③ 长期翻译记忆（永久保留，只有你主动清理才删除）。"
@@ -329,7 +329,7 @@ class SettingsPage(QWidget):
     # ---- E. 界面 ----
     def _section_ui(self) -> QWidget:
         card = Card()
-        card.add(section_title("E. 界面"))
+        card.add(section_title("界面"))
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
         form.setSpacing(8)
@@ -349,6 +349,8 @@ class SettingsPage(QWidget):
         form.addRow("", self.auto_scroll_check)
         self.tray_check = QCheckBox("关闭窗口时最小化到系统托盘")
         form.addRow("", self.tray_check)
+        self.check_updates_check = QCheckBox("启动时检查更新（只读公开版本号，不上传任何资料）")
+        form.addRow("", self.check_updates_check)
         card.add_layout(form)
         return card
 
@@ -397,6 +399,7 @@ class SettingsPage(QWidget):
         idx = self.order_combo.findData("top" if getattr(cfg, "newest_first", False) else "bottom")
         self.order_combo.setCurrentIndex(max(0, idx))
         self.tray_check.setChecked(bool(cfg.minimize_to_tray))
+        self.check_updates_check.setChecked(bool(getattr(cfg, "check_updates", True)))
         self.reset_on_startup_check.setChecked(bool(getattr(cfg, "reset_on_startup", True)))
 
         self._refresh_counts()
@@ -645,6 +648,7 @@ class SettingsPage(QWidget):
         cfg.sidebar_collapsed = bool(getattr(self.context.config, "sidebar_collapsed", False))
         cfg.auto_scroll = bool(self.auto_scroll_check.isChecked())
         cfg.newest_first = (self.order_combo.currentData() == "top")
+        cfg.check_updates = bool(self.check_updates_check.isChecked())
         cfg.minimize_to_tray = bool(self.tray_check.isChecked())
         cfg.reset_on_startup = bool(self.reset_on_startup_check.isChecked())
         cfg._coerce()

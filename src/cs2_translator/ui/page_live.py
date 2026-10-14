@@ -510,13 +510,13 @@ class LivePage(QWidget):
 
         buttons = QVBoxLayout()
         buttons.setSpacing(6)
-        self.reply_translate_button = primary_button("翻译", "send")
+        self.reply_translate_button = primary_button("翻译并复制", "send")
+        self.reply_translate_button.setToolTip(
+            "翻译成功后会自动复制到剪贴板，你直接进游戏 Ctrl+V 粘贴即可。\n"
+            "本程序不会自动发送、也不会模拟按键。"
+        )
         self.reply_translate_button.clicked.connect(self._on_reply_translate)
         buttons.addWidget(self.reply_translate_button)
-        self.reply_copy_button = ghost_button("复制译文", "copy")
-        self.reply_copy_button.setEnabled(False)
-        self.reply_copy_button.clicked.connect(self._on_reply_copy)
-        buttons.addWidget(self.reply_copy_button)
         buttons.addStretch(1)
         body.addLayout(buttons)
         card.add_layout(body)
@@ -528,33 +528,13 @@ class LivePage(QWidget):
         self.reply_result_label.setVisible(False)
         card.add(self.reply_result_label)
 
-        # ---- 三态指示 + 用户确认发送 ----
-        state_row = QHBoxLayout()
-        state_row.setSpacing(10)
+        # ---- 状态提示（翻译成功 = 已自动复制，去游戏粘贴即可）----
+        # 去掉了「复制译文」按钮（翻译成功即已复制）与「我已发送」确认框
+        # （程序本就不负责发送，无需使用者回报）。
         self.state_label = QLabel("等待翻译")
         self.state_label.setObjectName("statePending")
-        state_row.addWidget(self.state_label)
-        state_row.addStretch(1)
-
-        self.send_button = QPushButton("我已发送（确认）")
-        self.send_button.setCheckable(True)
-        self.send_button.setEnabled(False)
-        self.send_button.setToolTip(
-            "本程序不会自动发送、也不模拟按键。\n"
-            "请你在游戏内正常粘贴并发送后，再勾选此项以记录状态。"
-        )
-        self.send_button.setCursor(Qt.PointingHandCursor)
-        self.send_button.toggled.connect(self._on_send_confirm)
-        state_row.addWidget(self.send_button)
-        card.add_layout(state_row)
-
-        self.send_hint = QLabel(
-            "已记录为「已在游戏中发送」。本程序全程未自动发送任何内容。"
-        )
-        self.send_hint.setObjectName("hintLabel")
-        self.send_hint.setWordWrap(True)
-        self.send_hint.setVisible(False)
-        card.add(self.send_hint)
+        self.state_label.setWordWrap(True)
+        card.add(self.state_label)
         self._reply_state = "pending"
         self._last_reply_translation = ""
 
@@ -768,26 +748,23 @@ class LivePage(QWidget):
     def _on_reply_translate(self) -> None:
         text = self.reply_input.toPlainText().strip()
         if not text:
-            self.reply_status.setText("请输入要翻译的中文内容")
+            self._reply_state = "empty"
+            self._refresh_state_label()
             return
-        self.reply_status.setText("翻译中…")
         self.reply_translate_button.setEnabled(False)
         self.reply_result_label.setVisible(False)
+        self._reply_state = "translating"
+        self._refresh_state_label()
         self.reply_requested.emit(text, self.current_target_language())
 
-    def _on_reply_copy(self) -> None:
-        """复制译文 -> 状态变为「已复制」（不等于已发送）。"""
-        if self._last_reply_translation:
-            self.copy_requested.emit(self._last_reply_translation)
-            self.mark_copied()
-
     def show_reply_result(self, result: dict) -> None:
-        """显示回复翻译结果；失败时保留输入草稿。
+        """显示回复翻译结果，成功时**自动复制**到剪贴板。
 
-        三态严格区分（绝不虚报）：
-          ① 译文已生成（translated 返回时）
-          ② 已复制（用户点复制后，由 mark_copied 更新）
-          ③ 已在游戏中发送（必须用户明确确认，由 mark_sent 更新）
+        设计逻辑：翻译成功 → 自动复制 → 使用者直接进游戏 Ctrl+V 粘贴。
+        因此不再需要「复制译文」按钮，也不再有「我已发送」确认框
+        （程序本就不负责发送，无需使用者回报状态）。
+
+        失败时保留输入草稿，让使用者可以直接重试。
         """
         self.reply_translate_button.setEnabled(True)
         if result.get("ok"):
@@ -795,64 +772,75 @@ class LivePage(QWidget):
             self._last_reply_translation = translated
             self.reply_result_label.setText(translated)
             self.reply_result_label.setVisible(True)
-            self.reply_copy_button.setEnabled(bool(translated))
-            # 重新生成译文 -> 回到「已生成」，清除之前的已复制/已发送状态
-            self._reply_state = "generated"
-            self.send_button.setEnabled(bool(translated))
-            self.send_button.setChecked(False)
+            if translated:
+                # 自动复制：这是「翻译并复制」的核心行为
+                self.copy_requested.emit(translated)
+                self._reply_state = "copied"
+            else:
+                self._reply_state = "empty"
             hit = result.get("hit_kind") or "api"
             latency = result.get("latency_ms") or 0
             source = {"correction": "人工修正", "exact": "缓存", "term": "术语",
                       "template": "模板"}.get(hit, "在线 API")
             self.reply_status.setText(f"{source} · {latency:.0f} ms")
-            self._refresh_state_label()
         else:
             self.reply_result_label.setVisible(False)
-            self.reply_copy_button.setEnabled(False)
-            self.send_button.setEnabled(False)
-            self._reply_state = "pending"
-            self.reply_status.setText(f"翻译失败：{result.get('error', '未知错误')}（草稿已保留）")
-            self._refresh_state_label()
+            self._reply_state = "failed"
+            self.reply_status.setText(result.get("error", "未知错误"))
+        self._refresh_state_label()
 
     # ------------------------------------------------------------------
-    # 回复三态
+    # 回复状态提示
     # ------------------------------------------------------------------
     def mark_copied(self) -> None:
-        """用户复制了译文：进入「已复制」，但不等于已发送。"""
+        """标记译文已复制（翻译成功时自动调用）。"""
         if not self._last_reply_translation:
             return
-        if self._reply_state != "sent":
-            self._reply_state = "copied"
+        self._reply_state = "copied"
         self._refresh_state_label()
-
-    def mark_sent(self) -> None:
-        """用户明确确认已在游戏中发送（由用户勾选确认框触发）。"""
-        if not self._last_reply_translation:
-            return
-        self._reply_state = "sent"
-        self._refresh_state_label()
-
-    def _on_send_confirm(self, checked: bool) -> None:
-        self.send_hint.setVisible(bool(checked))
-        if checked:
-            self.mark_sent()
-        elif self._reply_state == "sent":
-            # 取消勾选 -> 退回已复制/已生成，不保留虚假的已发送状态
-            self._reply_state = "copied" if self._last_reply_translation else "pending"
-            self._refresh_state_label()
 
     def _refresh_state_label(self) -> None:
-        texts = {
-            "generated": ("① 译文已生成（尚未复制）", "stateGenerated"),
-            "copied": ("② 已复制到剪贴板（尚未发送）", "stateCopied"),
-            "sent": ("③ 已确认在游戏中发送", "stateSent"),
-            "pending": ("等待翻译", "statePending"),
-        }
-        text, obj = texts.get(self._reply_state, texts["pending"])
-        self.state_label.setText(text)
-        self.state_label.setObjectName(obj)
-        self.state_label.style().unpolish(self.state_label)
-        self.state_label.style().polish(self.state_label)
+        """刷新状态提示。
+
+        每种状态由「圆点 + 主文字 + 副说明」组成，用 HTML 富文本在一个
+        QLabel 里排版，避免多个控件挤在一行（旧版三个控件并排很难看）。
+        """
+        p = active_palette()
+        dot = {
+            "copied": p.success,
+            "translating": p.warning,
+            "failed": p.danger,
+            "empty": p.text_faint,
+        }.get(self._reply_state, p.text_faint)
+
+        if self._reply_state == "copied":
+            main = "译文已复制到剪贴板"
+            sub = "切回游戏按 Ctrl+V 粘贴即可发送（本程序不会自动发送）"
+            main_color = p.success
+        elif self._reply_state == "translating":
+            main = "正在翻译…"
+            sub = ""
+            main_color = p.warning
+        elif self._reply_state == "failed":
+            main = "翻译失败，草稿已保留"
+            sub = "可直接修改后重试"
+            main_color = p.danger
+        elif self._reply_state == "empty":
+            main = "请先输入要翻译的中文"
+            sub = ""
+            main_color = p.text_faint
+        else:
+            main = "等待翻译"
+            sub = "输入中文后按 Ctrl+Enter 或点「翻译并复制」"
+            main_color = p.text_muted
+
+        html = (
+            f'<span style="color:{dot};">●</span>&nbsp;'
+            f'<span style="color:{main_color};font-weight:600;">{main}</span>'
+        )
+        if sub:
+            html += f'&nbsp;&nbsp;<span style="color:{p.text_faint};font-size:12px;">{sub}</span>'
+        self.state_label.setText(html)
 
     def _on_pause_toggled(self, paused: bool) -> None:
         self.pause_button.setText("继续翻译" if paused else "暂停翻译")

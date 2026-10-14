@@ -526,11 +526,16 @@ QToolTip {{
     padding: 4px 6px;
 }}
 
-/* ============================ 回复三态指示 ============================ */
-QLabel#stateGenerated {{ color: {p.success}; font-size: {t.size_sm}px; }}
-QLabel#stateCopied {{ color: {p.info}; font-size: {t.size_sm}px; }}
-QLabel#stateSent {{ color: {p.warning}; font-size: {t.size_sm}px; }}
-QLabel#statePending {{ color: {p.text_faint}; font-size: {t.size_sm}px; }}
+/* ============================ 回复状态提示 ============================ */
+/* 单一 QLabel + HTML 富文本（圆点 + 主文字 + 副说明），不再并排多个控件。
+   颜色由 _refresh_state_label() 直接写进 HTML，所以这里只管排版。 */
+QLabel#statePending {{
+    background-color: {p.bg_raised};
+    border: 1px solid {p.divider};
+    border-radius: {RADIUS.sm}px;
+    padding: 7px 12px;
+    font-size: {t.size_sm}px;
+}}
 
 /* ============================ 状态栏 ============================ */
 QStatusBar {{ background-color: {p.bg_root}; color: {p.text_muted}; border-top: 1px solid {p.divider}; }}

@@ -468,7 +468,8 @@ class TestChineseReplyFlow:
             live.reply_input.setPlainText("   ")
             live._on_reply_translate()
             assert captured == [], "空白輸入不應送出翻譯請求"
-            assert "请输入" in live.reply_status.text()
+            # 空白輸入的提示現在在 state_label（狀態提示區）
+            assert "请先输入" in live.state_label.text()
         finally:
             win._really_quit = True
             win.close()
@@ -489,6 +490,75 @@ class TestChineseReplyFlow:
             win._really_quit = True
             win.close()
 
+    def test_success_auto_copies_and_reports_copied(self, qapp, tmp_path):
+        """翻譯成功必須**自動複製**，狀態為『已複製到剪貼板』。
+
+        設計邏輯：翻譯成功 → 自動複製 → 使用者進遊戲 Ctrl+V 粘貼。
+        因此不需要「複製譯文」按鈕，也不需要「我已發送」確認框。
+        """
+        win = self._win(qapp, tmp_path)
+        try:
+            live = win.live_page
+            copied = []
+            live.copy_requested.connect(copied.append)
+
+            live.show_reply_result({"ok": True, "translated": "Don't push, hold",
+                                    "hit_kind": "api", "latency_ms": 900.0})
+            assert copied == ["Don't push, hold"], "翻譯成功應自動複製"
+            assert live._reply_state == "copied"
+            assert "已复制到剪贴板" in live.state_label.text()
+
+            # 重新翻譯 -> 再次自動複製，不會殘留舊狀態
+            live.show_reply_result({"ok": True, "translated": "Second version"})
+            assert copied == ["Don't push, hold", "Second version"]
+            assert live._reply_state == "copied"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_removed_widgets_are_gone(self, qapp, tmp_path):
+        """舊版的三個控件必須已移除（避免幽靈代碼回歸）。"""
+        win = self._win(qapp, tmp_path)
+        try:
+            live = win.live_page
+            for attr in ("reply_copy_button", "send_button", "send_hint"):
+                assert not hasattr(live, attr), f"{attr} 應該已移除"
+            for method in ("mark_sent", "_on_send_confirm", "_on_reply_copy"):
+                assert not hasattr(live, method), f"{method}() 應該已移除"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_empty_input_does_not_request(self, qapp, tmp_path):
+        """空白輸入不應送出請求，並提示使用者。"""
+        win = self._win(qapp, tmp_path)
+        try:
+            live = win.live_page
+            captured = []
+            live.reply_requested.connect(lambda t, l: captured.append(t))
+            live.reply_input.setPlainText("   ")
+            live._on_reply_translate()
+            assert captured == []
+            assert live._reply_state == "empty"
+            assert "请先输入" in live.state_label.text()
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_failure_sets_failed_state(self, qapp, tmp_path):
+        """失敗時狀態為 failed，且不清空草稿。"""
+        win = self._win(qapp, tmp_path)
+        try:
+            live = win.live_page
+            live.reply_input.setPlainText("转点，快点")
+            live.show_reply_result({"ok": False, "error": "网络断开"})
+            assert live._reply_state == "failed"
+            assert "失败" in live.state_label.text()
+            assert live.reply_input.toPlainText() == "转点，快点"
+        finally:
+            win._really_quit = True
+            win.close()
+
     def test_result_is_editable_and_selectable(self, qapp, tmp_path):
         win = self._win(qapp, tmp_path)
         try:
@@ -502,36 +572,6 @@ class TestChineseReplyFlow:
         finally:
             win._really_quit = True
             win.close()
-
-    def test_retranslate_resets_sent_state(self, qapp, tmp_path):
-        """重新翻譯後必須回到『已生成』，不能殘留『已發送』。"""
-        win = self._win(qapp, tmp_path)
-        try:
-            live = win.live_page
-            live.show_reply_result({"ok": True, "translated": "第一版"})
-            live.mark_copied()
-            live.send_button.setChecked(True)
-            assert live._reply_state == "sent"
-
-            live.show_reply_result({"ok": True, "translated": "第二版"})
-            assert live._reply_state == "generated"
-            assert live.send_button.isChecked() is False
-        finally:
-            win._really_quit = True
-            win.close()
-
-    def test_failure_keeps_draft(self, qapp, tmp_path):
-        win = self._win(qapp, tmp_path)
-        try:
-            live = win.live_page
-            live.reply_input.setPlainText("转点，快点")
-            live.show_reply_result({"ok": False, "error": "网络断开"})
-            assert live.reply_input.toPlainText() == "转点，快点"
-            assert live._reply_state == "pending"
-        finally:
-            win._really_quit = True
-            win.close()
-
 
 class TestGlossaryPerformance:
     """詞彙表效能回歸：欄寬自動貼合不得退化成 O(n²)。
@@ -704,6 +744,75 @@ class TestGlossaryPerformance:
             assert not page._search_timer.isActive()
             page.search_edit.setText("rush")
             assert page._search_timer.isActive(), "輸入後應啟動延遲計時器"
+        finally:
+            win._really_quit = True
+            win.close()
+
+
+class TestUpdateCheck:
+    """啟動檢查更新的版本比較邏輯。
+
+    這是本專案**唯一**會主動連網的非翻譯請求，只讀公開版本號、不送本地資料，
+    且可由 config.check_updates 關閉。因此版本比較必須正確，
+    否則會誤報「有新版本」或漏報。
+    """
+
+    def test_parse_version_handles_prefix(self):
+        from cs2_translator.update_check import parse_version
+
+        assert parse_version("v1.2.1") == (1, 2, 1)
+        assert parse_version("1.2.1") == (1, 2, 1)
+        assert parse_version("v2.0") == (2, 0)
+        assert parse_version("") == (0,)
+        assert parse_version(None) == (0,)
+
+    def test_is_newer(self):
+        from cs2_translator.update_check import is_newer
+
+        assert is_newer("v1.2.1", "1.2.0") is True
+        assert is_newer("v1.3.0", "1.2.1") is True
+        assert is_newer("v2.0", "1.9.9") is True
+        # 相同版本不算新
+        assert is_newer("v1.2.1", "1.2.1") is False
+        assert is_newer("v1.2.0", "1.2.1") is False
+        # 空值不可誤報
+        assert is_newer("", "1.0") is False
+        assert is_newer("v1.0", "") is True
+
+    def test_check_updates_config_default_on_and_roundtrip(self, qapp, tmp_path):
+        """預設開啟，且設定頁讀寫要保留。"""
+        from cs2_translator.config import ConfigManager
+        from cs2_translator.ui.main_window import MainWindow
+
+        cfg = AppConfig(cs2_log_path=str(tmp_path / "console.log"), api_key="sk",
+                        model="gpt-4o-mini", log_poll_interval=0.05)
+        assert cfg.check_updates is True, "預設應開啟檢查更新"
+        win = MainWindow(cfg, ConfigManager(data_dir=tmp_path / "data"))
+        win.show()
+        try:
+            page = win.pages["settings"]
+            page.reload()
+            qapp.processEvents()
+            assert page.check_updates_check.isChecked() is True
+            page.check_updates_check.setChecked(False)
+            assert page._collect().check_updates is False
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_update_check_disabled_does_not_start_worker(self, qapp, tmp_path):
+        """關閉後不得啟動任何連網執行緒。"""
+        from cs2_translator.config import ConfigManager
+        from cs2_translator.ui.main_window import MainWindow
+
+        cfg = AppConfig(cs2_log_path=str(tmp_path / "console.log"), api_key="sk",
+                        model="gpt-4o-mini", log_poll_interval=0.05,
+                        check_updates=False)
+        win = MainWindow(cfg, ConfigManager(data_dir=tmp_path / "data"))
+        win.show()
+        try:
+            assert getattr(win, "_update_worker", None) is None, \
+                "關閉檢查更新後不應建立 worker"
         finally:
             win._really_quit = True
             win.close()

@@ -69,6 +69,81 @@ class TestPackagingSpec:
             "自檢應涵蓋 ssl 與 openai"
 
 
+class TestDatabaseClosedState:
+    """資料庫關閉後的行為（真實競態 bug 的回歸測試）。
+
+    真實事故：關閉視窗時引擎會關掉資料庫，但介面上仍有定時器
+    （狀態列每秒刷新、分頁的搜尋防抖）可能在關閉後才觸發，
+    對已關閉的連線查詢會拋 `sqlite3.ProgrammingError:
+    Cannot operate on a closed database`，在控制台留下紅色堆疊。
+
+    修法：Database 加 _closed 旗標。關閉後 query_one 回 None、
+    query_all 回 []（讀取路徑安全）；寫入用的 transaction 仍明確報錯，
+    因為靜默吞掉寫失敗會掩蓋真正的問題。
+    """
+
+    @staticmethod
+    def _db(tmp_path):
+        from cs2_translator.memory.db import Database
+
+        return Database(tmp_path / "t.db")
+
+    def test_query_before_close_works(self, tmp_path):
+        db = self._db(tmp_path)
+        try:
+            assert db.is_closed() is False
+            assert db.query_one("SELECT 1 AS n")["n"] == 1
+        finally:
+            db.close()
+
+    def test_query_one_returns_none_after_close(self, tmp_path):
+        db = self._db(tmp_path)
+        db.close()
+        assert db.is_closed() is True
+        assert db.query_one("SELECT 1 AS n") is None
+
+    def test_query_all_returns_empty_after_close(self, tmp_path):
+        db = self._db(tmp_path)
+        db.close()
+        assert db.query_all("SELECT 1 AS n") == []
+
+    def test_double_close_is_safe(self, tmp_path):
+        db = self._db(tmp_path)
+        db.close()
+        db.close()  # 不應拋出例外
+        assert db.is_closed() is True
+
+    def test_transaction_still_raises_after_close(self, tmp_path):
+        """寫入路徑必須明確報錯，不能靜默吞掉。"""
+        import sqlite3
+
+        db = self._db(tmp_path)
+        db.close()
+        with pytest.raises(sqlite3.ProgrammingError):
+            with db.transaction():
+                pass
+
+    def test_pages_expose_stop_timers(self, qapp, tmp_path):
+        """有延遲定時器的頁面必須提供 stop_timers()，供關閉流程呼叫。"""
+        from cs2_translator.config import ConfigManager
+        from cs2_translator.ui.main_window import MainWindow
+
+        cfg = AppConfig(cs2_log_path=str(tmp_path / "console.log"), api_key="sk",
+                        model="gpt-4o-mini", log_poll_interval=0.05)
+        win = MainWindow(cfg, ConfigManager(data_dir=tmp_path / "data"))
+        win.show()
+        try:
+            for key in ("memory", "glossary"):
+                page = win.pages[key]
+                assert hasattr(page, "stop_timers"), f"{key} 頁缺少 stop_timers()"
+                # 觸發定時器後再停掉，確認不會拋例外
+                page.search_edit.setText("x")
+                page.stop_timers()
+        finally:
+            win._really_quit = True
+            win.close()
+
+
 class TestDataDirStability:
     """資料目錄名稱必須穩定，且與對外顯示名解耦。
 

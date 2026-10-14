@@ -75,6 +75,8 @@ class AppConfig:
     # 实时翻译页的消息排列：False = 最新在底部（自动滚动到底）
     #                      True  = 最新在顶部（永远第一眼看到最新）
     newest_first: bool = False
+    # 启动时检查更新（只读 GitHub 公开版本号，不发送任何本地资料）
+    check_updates: bool = True
     minimize_to_tray: bool = True
 
     # ---- 流水线 ----
@@ -178,7 +180,8 @@ class AppConfig:
         _float("log_poll_interval", 0.05, 10.0, 0.25)
         for name in (
             "read_history_on_start", "translate_enabled", "auto_suggest_reply_language",
-            "auto_scroll", "newest_first", "minimize_to_tray", "save_history", "first_run_completed",
+            "auto_scroll", "newest_first", "check_updates", "minimize_to_tray",
+            "save_history", "first_run_completed",
             "enable_generic_name_pattern", "memory_enabled", "save_memory_history",
             "auto_cleanup_history", "auto_match_detection", "sidebar_collapsed",
             "reset_on_startup",
