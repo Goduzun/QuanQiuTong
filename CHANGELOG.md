@@ -1,0 +1,203 @@
+# Changelog · 更新日志
+
+All notable changes to this project are documented here.
+Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
+versioning follows [Semantic Versioning](https://semver.org/).
+
+本项目的重要变更都记录在此。格式参考 [Keep a Changelog](https://keepachangelog.com/)，
+版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+[**English**](#english) · [**简体中文**](#简体中文)
+
+---
+
+## English
+
+### [1.2.1] — 2026-10-14
+
+#### Fixed
+- **Critical: removed OpenSSL DLLs broke all translation.**
+  v1.2.0's slimming pass excluded `libssl-1_1.dll` / `libcrypto-1_1.dll` based on the
+  incorrect assumption that "Python 3.11 uses OpenSSL 3.x". In reality this Python's
+  `_ssl.pyd` imports them directly (OpenSSL 1.1.1u). The result: `_ssl` failed to load →
+  `openai` could not be imported → translation stopped entirely, with the GUI showing only
+  a single line about it.
+  - Both DLLs removed from the exclusion lists; a prominent warning now sits next to the
+    list so nobody repeats this.
+  - Size cost: 32.52 MB → 34.01 MB (+1.49 MB). Still 37.5% smaller than the original 54.44 MB.
+
+#### Added
+- **`--diagnose` runtime self-check.** Reports whether `ssl` and `openai` actually load,
+  and prints an actionable fix when they don't:
+  ```
+  ==== 运行环璄自检 ====
+    ssl: OK  OpenSSL 1.1.1u  30 May 2023
+    openai: OK  2.54.0
+  ```
+- **`TestPackagingSpec`** (5 tests) — locks down that no spec may exclude the OpenSSL DLLs,
+  the required Qt modules, or the warning comment explaining why.
+
+#### Notes
+- Why the v1.2.0 verification missed this: the HTTPS check was run against the `.venv`
+  interpreter (which has full OpenSSL) rather than the packaged EXE. Verification now
+  targets the build artefact itself.
+
+### [1.2.0] — 2026-10-14
+
+#### Added
+- **Message ordering setting** — choose *newest at bottom + auto-scroll* (default) or
+  *newest at top*, so new messages are never missed when you aren't scrolling.
+- **WCAG AA compliance across the whole palette** — 15 colour pairs measured and corrected.
+  8 pairs were failing, e.g. the primary button's white text was 3.59:1 against the
+  accent colour (needs 4.5:1); light-theme `success` was 3.29:1.
+- **Design token unification** — type scale opened up to 11/12/14/16/20/24 (13 and 14 were
+  only 1 px apart), spacing aligned to a 4 pt grid, radii moved to 6/10/14.
+- **Packaging slimming: 54.44 MB → 32.52 MB (−40.3%).** Every exclusion justified by PE
+  import-table analysis (see README → Building).
+
+#### Changed
+- `PageHeader` no longer renders a title — the shell's top bar owns the page title.
+  Previously both used `objectName="pageTitle"`, so every page showed its title twice,
+  both at 24 px.
+- The Settings page's duplicate `section_title("设置")` removed.
+- `QLabel` is now transparent by default. Qt paints a rectangle for every label once
+  `QWidget` has a background, and the global `QWidget` colour (`bg_surface`) is *darker*
+  than the page background (`bg_root`) — which put a visible dark box behind every label.
+
+#### Fixed
+- Auto-scroll could silently stop working: the "is the user at the bottom?" check was
+  computed from `value`/`maximum` on every message, but the scroll range hasn't updated
+  yet when a message is inserted, so "still at the bottom" was misread as "scrolled away".
+  Now tracked with an explicit flag.
+- Glossary performance: rebuilding the table with `ResizeToContents` columns was O(n²)
+  (Qt recomputes column widths after *every* `setItem`). 153 rows took 1300–3200 ms and
+  got slower on each visit. Rebuilding while hidden + one `resizeColumnsToContents()`
+  call → **8–14 ms**. Search input also debounced by 180 ms.
+- Statistics switched from fetching 100 000 rows into Python to a SQL aggregate
+  (`term_stats()`, 0.025 ms).
+- Subtitle in the page header no longer wraps to two lines when sharing a row with buttons.
+
+### [1.1.1] — 2026-10-13
+
+#### Fixed
+- **Critical: user data was orphaned.** `APP_NAME` had been changed to `"QuanQiuTong"`
+  (the *display* name) when the product was renamed. The app then looked in a brand-new
+  empty `%APPDATA%\QuanQiuTong` directory, leaving the real `config.json`, `secrets.json`
+  (API key) and `memory.db` (153 glossary terms, 61 cache entries, 139 history rows)
+  behind — from the user's side, "all my data is gone".
+  `APP_NAME` is now `"CS2ChatTranslator"` again, decoupled from `APP_DISPLAY_NAME`,
+  with `TestDataDirStability` in place to prevent a repeat.
+- Auto-scroll made resilient (see 1.2.0 — the flag-based rewrite landed here first).
+
+#### Added
+- `docs/核心邏輯說明.md` — design rationale for every subsystem.
+
+### [1.1.0] — 2026-10-13
+
+#### Added
+- Initial public release.
+- Read-only `console.log` watching with incremental byte-offset reads.
+- Live translation of foreign chat into Simplified Chinese.
+- Chinese reply translation with a strict three-state indicator
+  (*ready → copied → confirmed sent*); never auto-sends.
+- Per-match isolation with a generation counter; late results discarded.
+- Six-step lookup chain (manual correction → memory → glossary → templates → cache → API).
+- Three-tier retention: current match / match history / long-term memory.
+- Startup reset: clears live translations and match history, keeps glossary and memory.
+- PySide6 UI with sidebar navigation and dark/light themes.
+- CLI mode (`--cli`, `--diagnose`, `--reply`, `--version`).
+
+---
+
+## 简体中文
+
+### [1.2.1] — 2026-10-14
+
+#### 修复
+- **严重：误删 OpenSSL DLL 导致翻译功能全废。**
+  v1.2.0 的瘦身误把 `libssl-1_1.dll` / `libcrypto-1_1.dll` 列入排除清单，理由是
+  「Python 3.11 使用 OpenSSL 3.x」——该假设是错的。这个 Python 的 `_ssl.pyd`
+  直接汇入它们（OpenSSL 1.1.1u）。后果：`_ssl` 载入失败 → `openai` 无法 import →
+  翻译完全停止，而 GUI 只显示一行提示。
+  - 两个 DLL 已从排除清单移除，并在清单旁留下显眼警告防止重犯。
+  - 体积代价：32.52 MB → 34.01 MB（+1.49 MB），仍比原本 54.44 MB 小 37.5%。
+
+#### 新增
+- **`--diagnose` 运行环境自检**：报告 `ssl` 与 `openai` 是否真的可用，缺失时给出
+  可直接照着做的修复方向：
+  ```
+  ==== 运行环璄自检 ====
+    ssl: OK  OpenSSL 1.1.1u  30 May 2023
+    openai: OK  2.54.0
+  ```
+- **`TestPackagingSpec`（5 项测试）**：锁住「spec 不得排除 OpenSSL DLL / 必需 Qt 模块」，
+  并确保警告注解不被删掉。
+
+#### 说明
+- 为什么 v1.2.0 的验证没抓到：当时 HTTPS 测试跑在 `.venv` 的 Python 上（有完整
+  OpenSSL），而不是打包后的 EXE。现在验证直接针对构建产物本身。
+
+### [1.2.0] — 2026-10-14
+
+#### 新增
+- **消息排列设置**：可选「最新在底部 + 自动滚动」（默认）或「最新在顶部」，
+  不滚动也不会漏看新消息。
+- **全套调色板达 WCAG AA**：实测并修正 15 组配色，其中 8 组原先不合格
+  （例如主按钮白字对强调色只有 3.59:1，需 4.5:1；浅色主题 success 只有 3.29:1）。
+- **设计 token 统一**：字阶拉开为 11/12/14/16/20/24（原本 13 与 14 只差 1px）、
+  间距对齐 4pt 网格、圆角改为 6/10/14。
+- **打包瘦身 54.44 MB → 32.52 MB（−40.3%）**，每项排除都有 PE 汇入表分析依据
+  （见 README 的「构建」章节）。
+
+#### 变更
+- `PageHeader` 不再渲染标题，页面标题统一由外壳顶部栏负责。此前两处都用
+  `objectName="pageTitle"`，导致每页出现两次标题、且都被放大到 24px。
+- 移除设置页重复的 `section_title("设置")`。
+- `QLabel` 默认透明。Qt 在 `QWidget` 设定背景后会给每个标签画一块矩形，而全局
+  `QWidget` 颜色（`bg_surface`）比页面底色（`bg_root`）**更深**，
+  于是每个标签背后都有一块突兀的深色方块。
+
+#### 修复
+- 自动滚动会静默失效：「使用者是否在底部」原本每次都用 `value`/`maximum` 现算，
+  但消息刚插入时滚动条范围尚未更新，于是「其实还在底部」被误判成「已离开底部」。
+  现改为显式旗标追踪。
+- 词彙表效能：栏位用 `ResizeToContents` 时，Qt 会在**每次** `setItem` 后重算栏宽，
+  退化成 O(n²)。153 列要 1300–3200 ms，且越切越慢。改为重建期间隐藏表格 +
+  只呼叫一次 `resizeColumnsToContents()` → **8–14 ms**。搜寻框另加 180ms 延迟。
+- 统计改用 SQL 聚合（`term_stats()`，0.025 ms），不再把 10 万笔捞进 Python 逐笔数。
+- 页头副标题与按钮同排时被压成两行的问题。
+
+### [1.1.1] — 2026-10-13
+
+#### 修复
+- **严重：使用者资料变成孤儿。** 改产品名时把 `APP_NAME` 一起改成了 `"QuanQiuTong"`
+  （那是**显示名**）。程式于是跑去一个全新的空目录 `%APPDATA%\QuanQiuTong`，
+  真正的 `config.json`、`secrets.json`（API Key）与 `memory.db`（153 条术语、
+  61 条快取、139 条历史）全被留在原地 —— 使用者感受就是「资料全没了」。
+  现已把 `APP_NAME` 改回 `"CS2ChatTranslator"`，与 `APP_DISPLAY_NAME` 解耦，
+  并加入 `TestDataDirStability` 防止再犯。
+- 自动滚动改为旗标追踪（详见 1.2.0）。
+
+#### 新增
+- `docs/核心邏輯說明.md` —— 各子系统的设计逻辑与实作决策。
+
+### [1.1.0] — 2026-10-13
+
+#### 新增
+- 首次公开发布。
+- 只读监听 `console.log`，按字节增量读取。
+- 外语聊天 → 简体中文的实时翻译。
+- 中文回覆翻译，严格三态指示（已生成 → 已复制 → 已确认发送），绝不自动发送。
+- 对局隔离（代际计数，迟到结果丢弃）。
+- 六级查找链（人工修正 → 记忆 → 术语 → 模板 → 快取 → API）。
+- 三层资料保留：当前局 / 历史对局 / 长期记忆。
+- 启动重置：清空实时翻译与历史对局，保留词汇表与记忆库。
+- PySide6 界面：左侧导航 + 深色/浅色主题。
+- 命令列模式（`--cli`、`--diagnose`、`--reply`、`--version`）。
+
+---
+
+[1.2.1]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/Goduzun/QuanQiuTong/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/Goduzun/QuanQiuTong/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/Goduzun/QuanQiuTong/releases/tag/v1.1.0
