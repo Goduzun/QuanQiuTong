@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/license-MIT-4ec9a0?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-5aa9e6?style=flat-square)](README.zh-CN.md)
 [![Python](https://img.shields.io/badge/python-3.11-e0b055?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-377%20passed-4ec9a0?style=flat-square)](#测试)
+[![Tests](https://img.shields.io/badge/tests-389%20passed-4ec9a0?style=flat-square)](#测试)
 
 [**English**](README.md) · [**简体中文**](README.zh-CN.md)
 
@@ -37,13 +37,17 @@
 - **启动重置**：每次启动清空实时翻译与历史对局，**保留长期缓存与词汇表**
 - **现代界面**：左侧导航 + 顶部状态栏 + 五个页面，深色/浅色主题
 
-### 中文回复的三态（不虚报发送）
+### 中文回复：翻译即复制
 
 ```
-① 译文已生成（尚未复制）  →  ② 已复制到剪贴板（尚未发送）  →  ③ 已确认在游戏中发送
+输入中文  →  Ctrl+Enter（或点「翻译并复制」）  →  译文自动进剪贴板  →  进游戏 Ctrl+V 粘貼
 ```
 
-第三个状态**只能由你手动勾选**。本工具不自动发送、不模拟按键。
+翻译成功后**自动复制**，不需要再按任何复制按钮。
+
+**本工具不会自动发送、也不模拟按键** —— 状态提示会明确写着
+「切回游戏按 Ctrl+V 粘贴即可发送（本程序不会自动发送）」，
+绝不声称已经替你发送过。
 
 ### 六级查找（省钱）
 

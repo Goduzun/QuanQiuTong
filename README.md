@@ -16,7 +16,7 @@ No injection · No hooks · No memory reading · No game-file edits · **Trusted
 [![License](https://img.shields.io/badge/license-MIT-4ec9a0?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-5aa9e6?style=flat-square)](#requirements)
 [![Python](https://img.shields.io/badge/python-3.11-e0b055?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-377%20passed-4ec9a0?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-389%20passed-4ec9a0?style=flat-square)](#testing)
 
 [**English**](README.md) · [**简体中文**](README.zh-CN.md)
 
@@ -93,15 +93,16 @@ Watches `-condebug` output and translates incoming foreign chat into Simplified 
 - Messages already in Chinese are shown as-is and never sent to the API
 
 ### 💬 Reply assistant with honest state tracking
-Type Chinese, get English/Russian/Japanese/Korean, paste it into the game yourself.
-
-Three **strictly separated** states — it never claims you sent something you didn't:
+Type Chinese, get English/Russian/Japanese/Korean — and the translation lands **straight on
+your clipboard**, ready to paste:
 
 ```
-① Translation ready (not copied)  →  ② Copied to clipboard (not sent)  →  ③ Confirmed sent in game
+Type Chinese  →  Ctrl+Enter (or "Translate & Copy")  →  clipboard  →  Ctrl+V in game
 ```
 
-The third state is reachable **only** by you ticking a checkbox. No auto-send, no key simulation.
+**This app never sends anything for you** and never simulates keystrokes. The status line
+says so explicitly — *"paste it back in-game with Ctrl+V (this app does not send
+automatically)"* — and it never claims a message was sent on your behalf.
 
 ### 🎯 Per-match isolation
 Each match gets its own `match_id` and a generation counter.
@@ -307,7 +308,7 @@ What the exclusions actually save (all verified by measurement):
 python -m pytest tests/ -q
 ```
 
-**377 tests**, covering log parsing, language detection, cache/lookup ordering, failure
+**389 tests**, covering log parsing, language detection, cache/lookup ordering, failure
 handling, match isolation, the reply state machine, glossary performance, and the
 packaging spec itself.
 

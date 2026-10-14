@@ -13,6 +13,42 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## English
 
+### [1.2.2] — 2026-10-14
+
+#### Changed
+- **Reply flow simplified: translating now copies automatically.**
+  The real workflow is *translate → it's on your clipboard → `Ctrl+V` in game*, so the
+  separate "Copy translation" button and the "I've sent it" confirmation were both
+  redundant. The button is now **Translate & Copy**, and a single status line reports
+  state (ready / translating / copied / failed) instead of three widgets in a row.
+  - The status line still **never claims a message was sent**, and spells out
+    "this app does not send anything automatically".
+- Settings section headings lost their `A.` / `B.` / `C.` prefixes.
+
+#### Added
+- **API check on startup** — the status bar no longer sits on "API not tested" until you
+  visit Settings; it runs one check ~1.5 s after launch (only when a key is configured).
+- **Update check on startup** — queries the public GitHub Releases API for the latest
+  version number. It sends **no local data**, fails silently offline, and can be turned
+  off entirely in Settings.
+
+#### Fixed
+- **Translation-memory page stutter** — same O(n²) trap as the glossary: with
+  `ResizeToContents` columns, Qt recomputed column widths after *every* `setItem`
+  (64 rows × 7 columns). Rebuilding while hidden brought page switching to **13.5 ms**.
+  Search input is now debounced by 180 ms, and statistics use SQL aggregates
+  (`term_stats()` plus a new `template_count()`) instead of fetching 100 000 rows.
+- **Glossary and memory tables looked empty.** `resizeColumnsToContents()` also resizes
+  `Stretch` columns to their content width, so the six glossary columns totalled only
+  480 px inside a 1116 px table — leaving more than half the width blank. Now only the
+  `ResizeToContents` columns are measured; both tables fill **100%** of their viewport.
+- **Crash-on-close race.** `sqlite3.ProgrammingError: Cannot operate on a closed database`
+  could appear when the status timer or a debounced search fired after the engine had
+  already closed the database. `Database` now tracks a closed flag — reads return
+  `None` / `[]` after close, while `transaction()` still raises, so a silently dropped
+  write can't hide a real problem. Pages also expose `stop_timers()`, called during
+  shutdown, and the update thread is joined.
+
 ### [1.2.1] — 2026-10-14
 
 #### Fixed
@@ -111,6 +147,36 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## 简体中文
 
+### [1.2.2] — 2026-10-14
+
+#### 变更
+- **回覆翻譯流程简化：翻譯成功即自動複製。**
+  真实动线是「翻译出来 → 已在剪贴板 → 进游戏 Ctrl+V」，所以「复制译文」按钮与
+  「我已发送」确认框都是多余的。按钮改名为「**翻译并复制**」，状态提示改为
+  单一状态列（等待 / 翻译中 / 已复制 / 失败），不再三个控件并排。
+  - 状态提示**绝不声称已发送**，并明写「本程序不会自动发送」。
+- 设置页分组标题移除 `A.` / `B.` / `C.` 编号。
+
+#### 新增
+- **启动时自动测试 API** —— 状态列不再一直显示「API 未测试」，
+  启动约 1.5 秒后自动测一次（仅在有 API Key 时）。
+- **启动时检查更新** —— 查询 GitHub 公开 Releases API 的版本号，
+  **不发送任何本地资料**，离线时静默失败，可在设置里完全关闭。
+
+#### 修复
+- **翻译记忆页卡顿** —— 与词汇表同一个 O(n²) 陷阱：栏位用 `ResizeToContents` 时，
+  Qt 会在**每次** `setItem` 后重算栏宽（64 列 × 7 栏）。重建期间隐藏表格后，
+  切页降到 **13.5 ms**。搜寻框加 180ms 防抖，统计改用 SQL 聚合
+  （`term_stats()` 与新增的 `template_count()`），不再捞 10 万笔。
+- **词汇表与记忆表看起来「很空」** —— `resizeColumnsToContents()` 会把 `Stretch` 栏
+  也按内容宽度设置，导致词汇表 6 栏合计只有 480 px，而表格宽 1116 px，
+  超过一半是空白。现在只量测 `ResizeToContents` 的栏，两表填充率均为 **100%**。
+- **关闭时的竞态崩溃** —— 状态列定时器或搜寻防抖在引擎关闭数据库后触发时，
+  会抛 `sqlite3.ProgrammingError: Cannot operate on a closed database`。
+  `Database` 现在有 `_closed` 旗标：关闭后读取回传 `None` / `[]`，
+  但 `transaction()` 仍明确报错（静默吞掉写入会掩盖真问题）。
+  各页面另提供 `stop_timers()`，关闭流程会呼叫并等待更新检查执行绪结束。
+
 ### [1.2.1] — 2026-10-14
 
 #### 修复
@@ -197,6 +263,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+[1.2.2]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Goduzun/QuanQiuTong/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/Goduzun/QuanQiuTong/compare/v1.1.0...v1.1.1
