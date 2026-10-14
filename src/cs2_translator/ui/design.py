@@ -69,11 +69,16 @@ DARK = Palette(
     divider="#1f232b",
     text="#e6e8ee",
     text_muted="#a2a9b8",
-    text_faint="#6c7382",
+    # 原 #6c7382 在 bg_raised 上只有 3.59:1，不達 WCAG AA（4.5:1）
+    text_faint="#7d8493",
     text_inverse="#ffffff",
-    accent="#6d7cf5",
-    accent_hover="#7f8cf7",
-    accent_active="#5b6ae8",
+    # 原 #6d7cf5 配白字只有 3.59:1。壓到白字達標的邊界值 4.54:1。
+    accent="#5667f3",
+    # hover 不再用「更亮」（會讓白字掉到 4.49）
+    # 改由 QSS 的 filter: brightness() 提供回饋，這裡保持同色以確保達標
+    accent_hover="#5667f3",
+    # active（按下）用明顯較深的色，白字對比 10.42:1
+    accent_active="#0e21c2",
     accent_soft="#1e2240",
     success="#4ec9a0",
     success_soft="#12302a",
@@ -84,7 +89,8 @@ DARK = Palette(
     info="#5aa9e6",
     msg_source="#d7dbe6",
     msg_translated="#8fd6bd",
-    msg_meta="#767e8f",
+    # 原 #767e8f 在 bg_raised 上 4.19:1，不足
+    msg_meta="#7c8494",
 )
 
 LIGHT = Palette(
@@ -100,22 +106,26 @@ LIGHT = Palette(
     divider="#e6e9f0",
     text="#1b1e26",
     text_muted="#5a6272",
-    text_faint="#8b93a3",
+    # 原 #8b93a3 在 bg_raised 上只有 2.98:1
+    text_faint="#6b7487",
     text_inverse="#ffffff",
     accent="#4f5fd8",
-    accent_hover="#5f6ee6",
+    accent_hover="#5b6ae5",
     accent_active="#4150c4",
     accent_soft="#e8eafc",
-    success="#1f9d78",
-    success_soft="#e2f6ef",
-    warning="#b07d18",
-    warning_soft="#fdf3e0",
+    # 原 #1f9d78 只有 3.29:1；調暗到達標
+    success="#1a8364",
+    success_soft="#f4fcf9",
+    warning="#986c15",
+    warning_soft="#fefbf3",
     danger="#c8483f",
-    danger_soft="#fdeceb",
-    info="#2f7fc4",
+    danger_soft="#fef9f8",
+    info="#2c78ba",
     msg_source="#2a2f3a",
-    msg_translated="#1f7a5c",
-    msg_meta="#7a8292",
+    # 原 #1f7a5c 在 raised 上剛好 4.5 邊緣，略調暗以留餘裕
+    msg_translated="#1c6f54",
+    # 原 #7a8292 只有 3.73:1
+    msg_meta="#6c7484",
 )
 
 
@@ -137,12 +147,14 @@ class Typography:
 TYPO = Typography(
     family='"Microsoft YaHei UI", "Segoe UI", "PingFang SC", sans-serif',
     family_mono='"Cascadia Mono", "Consolas", "Courier New", monospace',
+    # 字階重新拉開：原 11/12/13/14/16/20 中 13 與 14 只差 1px，
+    # 層級在視覺上分不出來。改為 11/12/14/16/20/24，每一階都看得出差別。
     size_xs=11,
     size_sm=12,
-    size_base=13,
-    size_md=14,
-    size_lg=16,
-    size_xl=20,
+    size_base=14,
+    size_md=16,
+    size_lg=20,
+    size_xl=24,
     weight_normal=400,
     weight_medium=500,
     weight_bold=600,
@@ -151,20 +163,24 @@ TYPO = Typography(
 
 @dataclass(frozen=True)
 class Spacing:
-    xxs: int = 2
-    xs: int = 4
-    sm: int = 8
-    md: int = 12
-    lg: int = 16
-    xl: int = 24
-    xxl: int = 32
+    """4pt 網格間距（皆為 4 的倍數）。"""
+
+    xxs: int = 4
+    xs: int = 8
+    sm: int = 12
+    md: int = 16
+    lg: int = 24
+    xl: int = 32
+    xxl: int = 48
 
 
 @dataclass(frozen=True)
 class Radius:
-    sm: int = 4
-    md: int = 6
-    lg: int = 8
+    """圓角階梯（對齊 Material 3 / Apple HIG 的 8/10/14 節奏）。"""
+
+    sm: int = 6
+    md: int = 10
+    lg: int = 14
     pill: int = 999
 
 
@@ -272,7 +288,7 @@ QLabel#pageTitle {{
 }}
 /* 状态项：完全无边框无背景，仅悬停时给一点反馈 */
 QWidget#chip {{ background: transparent; }}
-QWidget#chip:hover {{ background: {p.bg_hover}; border-radius: 5px; }}
+QWidget#chip:hover {{ background: {p.bg_hover}; border-radius: {RADIUS.sm}px; }}
 QLabel#chipDot {{ background: transparent; font-size: 10px; }}
 QLabel#chipText {{
     background: transparent;
@@ -319,7 +335,7 @@ QPushButton {{
     background-color: {p.bg_raised};
     border: 1px solid {p.border};
     border-radius: {RADIUS.md}px;
-    padding: 6px 13px;
+    padding: 7px 15px;
     color: {p.text};
 }}
 QPushButton:hover {{ background-color: {p.bg_hover}; border-color: {p.border_strong}; }}
@@ -333,8 +349,20 @@ QPushButton#primary {{
     color: {p.text_inverse};
     font-weight: {t.weight_medium};
 }}
-QPushButton#primary:hover {{ background-color: {p.accent_hover}; border-color: {p.accent_hover}; }}
-QPushButton#primary:pressed {{ background-color: {p.accent_active}; }}
+/* hover：深色主題的 accent 已壓到「白字達標」的邊界（4.54），不能再換更亮的底色，
+   否則白字會掉到 4.49 不達 WCAG AA。因此改用「加亮邊框 + 輕微內縮」提供視覺回饋。
+   註：Qt 的 QSS 不支援 filter: brightness()，那條路走不通。 */
+QPushButton#primary:hover {{
+    background-color: {p.accent_hover};
+    border: 2px solid {p.border_strong};
+    padding: 6px 14px;
+}}
+QPushButton#primary:pressed {{
+    background-color: {p.accent_active};
+    border-color: {p.accent_active};
+    padding-top: 8px;
+    padding-bottom: 6px;
+}}
 QPushButton#primary:disabled {{ background-color: {p.bg_active}; border-color: {p.divider}; color: {p.text_faint}; }}
 
 QPushButton#ghost {{
@@ -390,10 +418,10 @@ QComboBox QAbstractItemView {{
 QCheckBox, QRadioButton {{ spacing: 6px; color: {p.text}; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; }}
 QCheckBox::indicator:unchecked {{
-    background-color: {p.bg_input}; border: 1px solid {p.border_strong}; border-radius: 3px;
+    background-color: {p.bg_input}; border: 1px solid {p.border_strong}; border-radius: {RADIUS.sm}px;
 }}
 QCheckBox::indicator:checked {{
-    background-color: {p.accent}; border: 1px solid {p.accent}; border-radius: 3px;
+    background-color: {p.accent}; border: 1px solid {p.accent}; border-radius: {RADIUS.sm}px;
 }}
 
 /* ============================ 表格 ============================ */
@@ -432,7 +460,11 @@ QLabel#badgeApi, QLabel#badgeCache, QLabel#badgeManual, QLabel#badgeSkip, QLabel
     padding: 1px 6px;
     font-size: {t.size_xs}px;
 }}
-QLabel#badgeApi {{ background-color: {p.accent_soft}; color: {p.accent_hover}; }}
+/* 徽章：底色用強調色的低飽和版本。
+   文字刻意用 accent_active 而非 accent_hover —— accent 色家族彼此亮度太接近，
+   在淺底上無法達到 WCAG AA；accent_active 是家族中最深的一個，
+   在兩個主題的底色上都有 8:1 以上。 */
+QLabel#badgeApi {{ background-color: {p.accent_soft}; color: {p.accent_active}; }}
 QLabel#badgeCache {{ background-color: {p.success_soft}; color: {p.success}; }}
 QLabel#badgeManual {{ background-color: {p.warning_soft}; color: {p.warning}; }}
 QLabel#badgeSkip {{ background-color: {p.bg_active}; color: {p.text_faint}; }}
@@ -444,12 +476,12 @@ QScrollBar:vertical {{
     background: transparent; width: 10px; margin: 0;
 }}
 QScrollBar::handle:vertical {{
-    background: {p.border_strong}; border-radius: 5px; min-height: 28px;
+    background: {p.border_strong}; border-radius: {RADIUS.pill}px; min-height: 28px;
 }}
 QScrollBar::handle:vertical:hover {{ background: {p.text_faint}; }}
 QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 0; }}
 QScrollBar::handle:horizontal {{
-    background: {p.border_strong}; border-radius: 5px; min-width: 28px;
+    background: {p.border_strong}; border-radius: {RADIUS.pill}px; min-width: 28px;
 }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
@@ -497,10 +529,10 @@ QStatusBar::item {{ border: none; }}
 
 /* ============================ 其他 ============================ */
 QProgressBar {{
-    background-color: {p.bg_active}; border: none; border-radius: 3px;
+    background-color: {p.bg_active}; border: none; border-radius: {RADIUS.pill}px;
     height: 4px; text-align: center; color: transparent;
 }}
-QProgressBar::chunk {{ background-color: {p.accent}; border-radius: 3px; }}
+QProgressBar::chunk {{ background-color: {p.accent}; border-radius: {RADIUS.pill}px; }}
 QSplitter::handle {{ background-color: {p.divider}; }}
 QSplitter::handle:hover {{ background-color: {p.accent}; }}
 """

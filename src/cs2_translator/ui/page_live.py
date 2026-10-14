@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from ..language import LANGUAGE_NAMES
 from . import icons
 from .context import format_clock
-from .design import DARK, active_palette
+from .design import DARK, RADIUS, TYPO, active_palette
 from .widgets import (
     Badge,
     Card,
@@ -212,9 +212,9 @@ class MessageDelegate(QStyledItemDelegate):
         row = index.data(ROLE_DATA) or {}
         width = max(240, option.rect.width() - 8)
         source_font = QFont(option.font)
-        source_font.setPixelSize(13)
+        source_font.setPixelSize(TYPO.size_base)
         trans_font = QFont(option.font)
-        trans_font.setPixelSize(14)
+        trans_font.setPixelSize(TYPO.size_md)
 
         src_h = self._text_height(row.get("source", ""), source_font, width - CARD_PADDING_H * 2)
         trans = row.get("translated") or ""
@@ -250,7 +250,7 @@ class MessageDelegate(QStyledItemDelegate):
                     (self.palette.bg_hover if hovered else self.palette.bg_raised))
         painter.setPen(Qt.NoPen)
         painter.setBrush(bg)
-        painter.drawRoundedRect(rect, 6, 6)
+        painter.drawRoundedRect(rect, RADIUS.md, RADIUS.md)
 
         # 左侧状态竖条（按状态着色）
         state = row.get("state", "pending")
@@ -270,7 +270,7 @@ class MessageDelegate(QStyledItemDelegate):
 
         # ---- 元信息行：时间 · 发送者 · 频道 · 徽章 ----
         meta_font = QFont(option.font)
-        meta_font.setPixelSize(11)
+        meta_font.setPixelSize(TYPO.size_xs)
         painter.setFont(meta_font)
         meta_text = f"{format_clock(row.get('timestamp'))}   {row.get('sender', '')}"
         channel = row.get("channel", "")
@@ -292,7 +292,7 @@ class MessageDelegate(QStyledItemDelegate):
             btn = QRect(rx - 24, y - 1, 22, 18)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(self.palette.bg_active))
-            painter.drawRoundedRect(btn, 4, 4)
+            painter.drawRoundedRect(btn, RADIUS.sm, RADIUS.sm)
             painter.setPen(QColor(self.palette.text_muted))
             painter.setFont(meta_font)
             painter.drawText(btn, int(Qt.AlignCenter), "复制")
@@ -303,7 +303,7 @@ class MessageDelegate(QStyledItemDelegate):
             btn2 = QRect(rx - 24, y - 1, 22, 18)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(self.palette.bg_active))
-            painter.drawRoundedRect(btn2, 4, 4)
+            painter.drawRoundedRect(btn2, RADIUS.sm, RADIUS.sm)
             painter.setPen(QColor(self.palette.text_muted))
             painter.drawText(btn2, int(Qt.AlignCenter), "改")
             self._hit_rects[(row_no, "edit")] = btn2
@@ -316,7 +316,7 @@ class MessageDelegate(QStyledItemDelegate):
             badge_rect = QRect(rx - bw, y - 1, bw, 18)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QColor(badge_bg))
-            painter.drawRoundedRect(badge_rect, 4, 4)
+            painter.drawRoundedRect(badge_rect, RADIUS.sm, RADIUS.sm)
             painter.setPen(QColor(badge_fg))
             painter.drawText(badge_rect, int(Qt.AlignCenter), badge_text)
             rx -= bw + 6
@@ -332,7 +332,7 @@ class MessageDelegate(QStyledItemDelegate):
 
         # ---- 原文 ----
         src_font = QFont(option.font)
-        src_font.setPixelSize(13)
+        src_font.setPixelSize(TYPO.size_base)
         painter.setFont(src_font)
         y += 15 + LINE_SPACING
         src_h = self._text_height(row.get("source", ""), src_font, inner_w)
@@ -346,7 +346,7 @@ class MessageDelegate(QStyledItemDelegate):
         if translated:
             y += src_h + LINE_SPACING
             trans_font = QFont(option.font)
-            trans_font.setPixelSize(14)
+            trans_font.setPixelSize(TYPO.size_md)
             painter.setFont(trans_font)
             if state == "error":
                 painter.setPen(QColor(self.palette.danger))

@@ -43,7 +43,7 @@ from ..config import AppConfig, ConfigManager
 from ..memory import DIRECTION_INCOMING, MatchManager
 from . import icons
 from .context import AppContext
-from .design import DARK, active_palette, palette_for
+from .design import DARK, TYPO, active_palette, palette_for
 from .page_glossary import GlossaryPage
 from .page_history import HistoryPage
 from .page_live import LivePage
@@ -212,7 +212,7 @@ class MainWindow(QMainWindow):
         self.page_title_label.setObjectName("pageTitle")
         # 显式设置字号字重：避免不同页面间出现字号不一致
         title_font = self.page_title_label.font()
-        title_font.setPixelSize(17)
+        title_font.setPixelSize(TYPO.size_lg)
         title_font.setBold(True)
         self.page_title_label.setFont(title_font)
         layout.addWidget(self.page_title_label)
