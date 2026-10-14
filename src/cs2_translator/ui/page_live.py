@@ -683,10 +683,6 @@ class LivePage(QWidget):
         else:
             self.new_message_button.setVisible(True)
 
-    def _at_bottom(self) -> bool:
-        bar = self.list_view.verticalScrollBar()
-        return bar.maximum() == 0 or bar.value() >= bar.maximum() - 4
-
     def scroll_to_bottom(self) -> None:
         self.list_view.scrollToBottom()
         self._user_scrolled_away = False

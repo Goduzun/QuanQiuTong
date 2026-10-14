@@ -206,6 +206,15 @@ QWidget {{
 }}
 QMainWindow, QDialog {{ background-color: {p.bg_root}; }}
 
+/* 标签默认透明。
+   Qt 的 QSS 在设置了 QWidget 背景后，QLabel 会自己画一块矩形 ——
+   而全局 QWidget 用的是 bg_surface，比页面底色 bg_root 更深，
+   于是每个标签周围都会出现一块突兀的深色方块（实测在深色主题下很明显：
+   「消息流」「等待聊天消息」及其说明文字背后都有色块）。
+   QLabel 本来就不需要自己的背景，统一设为透明，需要背景的
+   （徽章、chip 等）在各自规则里显式声明。 */
+QLabel {{ background: transparent; }}
+
 /* ============================ 字体层级 ============================ */
 /* 注意：pageTitle 只在顶栏使用（页面内标题已移除，避免同一页出现两次标题）。
    它的字号在下方 topBar 区块统一定义，这里不再重复声明，
