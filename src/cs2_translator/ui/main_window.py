@@ -605,6 +605,12 @@ class MainWindow(QMainWindow):
             logger.exception("应用对局保留设置失败")
         theme = getattr(config, "theme", "dark")
         self.apply_theme(theme)
+        # 套用消息排列顺序（最新在顶部 / 底部）
+        try:
+            self.live_page.apply_display_order(
+                bool(getattr(config, "newest_first", False)))
+        except Exception:
+            logger.exception("套用消息排列顺序失败")
         self.statusBar().showMessage("设置已保存并重新加载引擎", 5000)
         self._refresh_status()
 

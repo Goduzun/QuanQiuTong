@@ -336,7 +336,15 @@ class SettingsPage(QWidget):
         self.theme_combo.addItem("深色（默认）", "dark")
         self.theme_combo.addItem("浅色", "light")
         form.addRow("主题", self.theme_combo)
-        self.auto_scroll_check = QCheckBox("新消息自动滚动到底部")
+        self.order_combo = QComboBox()
+        self.order_combo.addItem("最新在底部 + 自动滚动（默认）", "bottom")
+        self.order_combo.addItem("最新在顶部（无需滚动，一眼看到新消息）", "top")
+        self.order_combo.setToolTip(
+            "选择「最新在顶部」后，新消息会插在最上面，\n"
+            "永远不会因为没滚动而漏看。"
+        )
+        form.addRow("消息排列", self.order_combo)
+        self.auto_scroll_check = QCheckBox("新消息自动滚动到最新（仅「最新在底部」时生效）")
         form.addRow("", self.auto_scroll_check)
         self.tray_check = QCheckBox("关闭窗口时最小化到系统托盘")
         form.addRow("", self.tray_check)
@@ -385,6 +393,8 @@ class SettingsPage(QWidget):
                 self.theme_combo.setCurrentIndex(i)
                 break
         self.auto_scroll_check.setChecked(bool(cfg.auto_scroll))
+        idx = self.order_combo.findData("top" if getattr(cfg, "newest_first", False) else "bottom")
+        self.order_combo.setCurrentIndex(max(0, idx))
         self.tray_check.setChecked(bool(cfg.minimize_to_tray))
         self.reset_on_startup_check.setChecked(bool(getattr(cfg, "reset_on_startup", True)))
 
@@ -633,6 +643,7 @@ class SettingsPage(QWidget):
         cfg.theme = str(self.theme_combo.currentData() or "dark")
         cfg.sidebar_collapsed = bool(getattr(self.context.config, "sidebar_collapsed", False))
         cfg.auto_scroll = bool(self.auto_scroll_check.isChecked())
+        cfg.newest_first = (self.order_combo.currentData() == "top")
         cfg.minimize_to_tray = bool(self.tray_check.isChecked())
         cfg.reset_on_startup = bool(self.reset_on_startup_check.isChecked())
         cfg._coerce()

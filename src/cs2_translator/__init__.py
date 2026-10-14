@@ -19,10 +19,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-__version__ = "1.1.0"
-# APP_NAME 用于数据目录（%APPDATA%\QuanQiuTong）与内部标识。
+__version__ = "1.1.1"
+# APP_NAME 用于数据目录（%APPDATA%\CS2ChatTranslator）与内部标识。
 # 刻意与对外显示名解耦：改名不会导致既有配置、翻译记忆与术语库搬家。
-APP_NAME = "QuanQiuTong"
+# ⚠ 绝对不要因为「改产品名」就改这个值 —— 那会让使用者的
+#   config.json / secrets.json（API Key）/ memory.db（翻译记忆、术语库）
+#   全部变成孤儿数据：程序会去一个全新的空目录，看起来像「资料全没了」。
+APP_NAME = "CS2ChatTranslator"
 APP_DISPLAY_NAME = "全球通"
 
 

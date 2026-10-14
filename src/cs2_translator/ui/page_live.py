@@ -59,12 +59,18 @@ LINE_SPACING = 4
 
 
 class MessageStreamModel(QAbstractListModel):
-    """消息流模型：持有当前对局的显示记录。"""
+    """消息流模型：持有当前对局的显示记录。
 
-    def __init__(self, limit: int = 300, parent=None):
+    ``newest_first=False``（默认）：新消息追加在**底部**，配合自动滚动到底。
+    ``newest_first=True``：新消息插在**顶部**，永远第一眼就看到最新内容，
+    不需要滚动也不会漏看。
+    """
+
+    def __init__(self, limit: int = 300, parent=None, newest_first: bool = False):
         super().__init__(parent)
         self.limit = max(50, int(limit))
         self._rows: list[dict] = []
+        self.newest_first = bool(newest_first)
 
     # ---- Qt 接口 ----
     def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
@@ -83,11 +89,21 @@ class MessageStreamModel(QAbstractListModel):
         return None
 
     # ---- 业务接口 ----
+    def set_newest_first(self, value: bool) -> None:
+        """切换排列顺序（保持现有内容不丢）。"""
+        value = bool(value)
+        if value == self.newest_first:
+            return
+        self.beginResetModel()
+        self.newest_first = value
+        self._rows.reverse()
+        self.endResetModel()
+
     def append(self, record: dict) -> None:
-        """O(1) 追加一条消息记录。"""
-        pos = len(self._rows)
+        """新增一条消息记录（依排列顺序插在顶部或追加到底部）。"""
+        pos = 0 if self.newest_first else len(self._rows)
         self.beginInsertRows(QModelIndex(), pos, pos)
-        self._rows.append(record)
+        self._rows.insert(pos, record)
         self.endInsertRows()
         self._enforce_limit()
 
@@ -95,9 +111,22 @@ class MessageStreamModel(QAbstractListModel):
         overflow = len(self._rows) - self.limit
         if overflow <= 0:
             return
-        self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
-        del self._rows[:overflow]
+        # 无论哪种排列顺序，被淘汰的都是「最旧」的那一端：
+        # 新消息在底部时最旧的在开头；新消息在顶部时最旧的在结尾。
+        if self.newest_first:
+            first = len(self._rows) - overflow
+            last = len(self._rows) - 1
+        else:
+            first, last = 0, overflow - 1
+        self.beginRemoveRows(QModelIndex(), first, last)
+        del self._rows[first:last + 1]
         self.endRemoveRows()
+
+    def newest_index(self) -> int:
+        """最新一条所在的行号（-1 表示空）。"""
+        if not self._rows:
+            return -1
+        return 0 if self.newest_first else len(self._rows) - 1
 
     def clear(self) -> None:
         if not self._rows:
@@ -347,6 +376,10 @@ class LivePage(QWidget):
     def __init__(self, context, parent=None):
         super().__init__(parent)
         self.context = context
+        # 使用者是否主动离开了「最新」位置（往上翻看旧消息）。
+        # 用旗标追踪而不是每次由 value/maximum 现算：消息刚插入时滚动条
+        # 范围尚未更新，现算会把「其实还在底部」误判为「已离开」。
+        self._user_scrolled_away = False
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -402,15 +435,18 @@ class LivePage(QWidget):
         self.search_edit.textChanged.connect(self._on_filter_changed)
         stream_head.addWidget(self.search_edit)
 
-        self.new_message_button = QPushButton("↓ 新消息")
+        self.new_message_button = QPushButton("↓ 回到最新")
         self.new_message_button.setObjectName("primary")
         self.new_message_button.setCursor(Qt.PointingHandCursor)
         self.new_message_button.setVisible(False)
-        self.new_message_button.clicked.connect(self.scroll_to_bottom)
+        self.new_message_button.clicked.connect(self.scroll_to_newest)
         stream_head.addWidget(self.new_message_button)
         stream_card.add_layout(stream_head)
 
-        self.model = MessageStreamModel(limit=self._configured_limit())
+        self.model = MessageStreamModel(
+            limit=self._configured_limit(),
+            newest_first=bool(getattr(self.context.config, "newest_first", False)),
+        )
         self.list_view = QListView()
         self.list_view.setModel(self.model)
         self.delegate = MessageDelegate(self.list_view)
@@ -602,31 +638,78 @@ class LivePage(QWidget):
         self.model.update_row(row_index, translated, hit_kind, state)
         self.update_stream_hint()
 
+    def apply_display_order(self, newest_first: bool) -> None:
+        """切换「最新在顶部 / 底部」，保留现有消息内容。"""
+        newest_first = bool(newest_first)
+        if bool(getattr(self.model, "newest_first", False)) == newest_first:
+            return
+        self.model.set_newest_first(newest_first)
+        self._user_scrolled_away = False
+        self._on_filter_changed(self.search_edit.text() if hasattr(self, "search_edit") else "")
+        self.update_stream_hint()
+        self.scroll_to_newest()
+
     def clear_stream(self) -> None:
         self.model.clear()
+        self._user_scrolled_away = False
         self.empty_state.setVisible(True)
         self.list_view.setVisible(False)
         self.update_stream_hint()
 
     def _maybe_autoscroll(self) -> None:
+        """新消息到达时把视图带到最新一条。
+
+        两种排列顺序：
+        - 最新在底部：滚动到底，除非使用者正在往上翻（此时显示「回到最新」按钮）。
+        - 最新在顶部：新消息插在 row 0，本来就在视野内，只需确保不在滚动中途
+          被推走，因此滚到顶部。
+
+        判定「使用者在不在底部」用 _user_scrolled_away 旗标追踪，
+        而不是每次用 value/maximum 現算 —— 因为消息刚插入时滚动条范围还
+        没更新，現算会把「其实在底部」误判成「已离开底部」，导致自动滚动
+        从此失效（真实使用者感受就是「必须手动往下滑」）。
+        """
+        newest_first = bool(getattr(self.model, "newest_first", False))
         if not bool(getattr(self.context.config, "auto_scroll", True)):
             return
-        bar = self.list_view.verticalScrollBar()
-        # 用户正在查看旧消息时不要把滚动条拉回底部
-        at_bottom = bar.value() >= bar.maximum() - 4
-        if at_bottom or bar.maximum() == 0:
-            self.scroll_to_bottom()
+        if newest_first:
+            # 最新在最上方，永远可见；顺手滚到顶避免被旧内容推走
+            if not self._user_scrolled_away:
+                self.list_view.scrollToTop()
             self.new_message_button.setVisible(False)
+            return
+        if not self._user_scrolled_away:
+            self.scroll_to_bottom()
         else:
             self.new_message_button.setVisible(True)
 
+    def _at_bottom(self) -> bool:
+        bar = self.list_view.verticalScrollBar()
+        return bar.maximum() == 0 or bar.value() >= bar.maximum() - 4
+
     def scroll_to_bottom(self) -> None:
         self.list_view.scrollToBottom()
+        self._user_scrolled_away = False
         self.new_message_button.setVisible(False)
 
+    def scroll_to_newest(self) -> None:
+        """滚到最新一条（依排列顺序决定是顶部还是底部）。"""
+        if bool(getattr(self.model, "newest_first", False)):
+            self.list_view.scrollToTop()
+            self._user_scrolled_away = False
+            self.new_message_button.setVisible(False)
+        else:
+            self.scroll_to_bottom()
+
     def _on_scroll(self, value: int) -> None:
+        """记录使用者是否主动离开了最新位置。"""
         bar = self.list_view.verticalScrollBar()
-        if value >= bar.maximum() - 4:
+        if bool(getattr(self.model, "newest_first", False)):
+            away = value > 4
+        else:
+            away = not (bar.maximum() == 0 or value >= bar.maximum() - 4)
+        self._user_scrolled_away = away
+        if not away:
             self.new_message_button.setVisible(False)
 
     def _on_filter_changed(self, keyword: str) -> None:

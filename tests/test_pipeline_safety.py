@@ -709,6 +709,225 @@ class TestGlossaryPerformance:
             win.close()
 
 
+class TestMessageOrderAndAutoscroll:
+    """实时翻译页的消息排列与自动滚动。
+
+    真实问题：有新消息出来时必须手动往下滑才能看到。
+    现在提供两种模式：
+    - 最新在底部 + 自动滚动到最新（默认）
+    - 最新在顶部（新消息插在 row 0，永远第一眼看到）
+
+    另外用旗标 _user_scrolled_away 取代每次由 value/maximum 现算，
+    因为消息刚插入时滚动条范围尚未更新，现算会把「其实还在底部」
+    误判成「已离开底部」，导致自动滚动从此失效。
+    """
+
+    @staticmethod
+    def _win(qapp, tmp_path, **over):
+        from cs2_translator.config import ConfigManager
+        from cs2_translator.ui.main_window import MainWindow
+
+        cfg = AppConfig(cs2_log_path=str(tmp_path / "console.log"), api_key="sk",
+                        model="gpt-4o-mini", log_poll_interval=0.05)
+        for k, v in over.items():
+            setattr(cfg, k, v)
+        win = MainWindow(cfg, ConfigManager(data_dir=tmp_path / "data"))
+        win.resize(1100, 640)
+        win.show()
+        win._switch_page("live")
+        qapp.processEvents()
+        return win
+
+    @staticmethod
+    def _msg(i):
+        return {"sender": f"p{i}", "source": f"message {i}", "translated": "譯",
+                "channel": "ALL", "time": "12:00", "raw": f"[ALL] p{i}: message {i}"}
+
+    def test_newest_first_inserts_at_top(self, qapp):
+        from cs2_translator.ui.page_live import MessageStreamModel
+
+        m = MessageStreamModel(limit=50, newest_first=True)
+        for i in range(3):
+            m.append({"source": f"m{i}"})
+        assert [r["source"] for r in m.rows()] == ["m2", "m1", "m0"]
+        assert m.newest_index() == 0
+
+    def test_oldest_first_appends_at_bottom(self, qapp):
+        from cs2_translator.ui.page_live import MessageStreamModel
+
+        m = MessageStreamModel(limit=50, newest_first=False)
+        for i in range(3):
+            m.append({"source": f"m{i}"})
+        assert [r["source"] for r in m.rows()] == ["m0", "m1", "m2"]
+        assert m.newest_index() == 2
+
+    def test_limit_evicts_oldest_in_both_orders(self, qapp):
+        """两种排列都必须淘汰最旧的那一端，且保留最新 50 条。"""
+        from cs2_translator.ui.page_live import MessageStreamModel
+
+        for newest_first in (False, True):
+            m = MessageStreamModel(limit=50, newest_first=newest_first)
+            for i in range(55):
+                m.append({"source": f"m{i:02d}"})
+            rows = [r["source"] for r in m.rows()]
+            assert len(rows) == 50, f"newest_first={newest_first} 列數 {len(rows)}"
+            assert rows[m.newest_index()] == "m54"
+            for gone in ("m00", "m01", "m02", "m03", "m04"):
+                assert gone not in rows, f"newest_first={newest_first} 未淘汰 {gone}"
+            if newest_first:
+                assert rows[0] == "m54" and rows[-1] == "m05"
+            else:
+                assert rows[0] == "m05" and rows[-1] == "m54"
+
+    def test_set_newest_first_reverses_without_data_loss(self, qapp):
+        from cs2_translator.ui.page_live import MessageStreamModel
+
+        m = MessageStreamModel(limit=50, newest_first=False)
+        for i in range(4):
+            m.append({"source": f"x{i}"})
+        before = [r["source"] for r in m.rows()]
+        m.set_newest_first(True)
+        after = [r["source"] for r in m.rows()]
+        assert after == before[::-1], f"{before} -> {after}"
+        assert sorted(after) == sorted(before)
+
+    def test_new_message_visible_without_manual_scroll(self, qapp, tmp_path):
+        """預設（最新在底部）下，連來 30 條都不需要手動滾動。"""
+        win = self._win(qapp, tmp_path, auto_scroll=True, newest_first=False)
+        try:
+            page = win.live_page
+            for i in range(30):
+                page.add_message(self._msg(i))
+                qapp.processEvents()
+            idx = page.model.index(page.model.newest_index(), 0)
+            vp = page.list_view.viewport().rect()
+            assert vp.intersects(page.list_view.visualRect(idx)), "最新一條不在可視範圍內"
+            assert page._user_scrolled_away is False
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_user_scrolling_away_is_respected(self, qapp, tmp_path):
+        """使用者主動往上翻時不得被強制拉回，但必須出現「回到最新」按鈕。"""
+        win = self._win(qapp, tmp_path, auto_scroll=True, newest_first=False)
+        try:
+            page = win.live_page
+            for i in range(30):
+                page.add_message(self._msg(i))
+                qapp.processEvents()
+            page.list_view.verticalScrollBar().setValue(0)
+            qapp.processEvents()
+            assert page._user_scrolled_away is True
+
+            page.add_message(self._msg(99))
+            qapp.processEvents()
+            assert page.new_message_button.isVisible(), "离开底部后应显示回到最新按钮"
+            page.scroll_to_newest()
+            qapp.processEvents()
+            assert page._user_scrolled_away is False
+            idx = page.model.index(page.model.newest_index(), 0)
+            vp = page.list_view.viewport().rect()
+            assert vp.intersects(page.list_view.visualRect(idx))
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_newest_first_mode_shows_newest_at_top(self, qapp, tmp_path):
+        """最新在頂部模式：新消息插在最上面，不需滾動。"""
+        win = self._win(qapp, tmp_path, auto_scroll=True, newest_first=True)
+        try:
+            page = win.live_page
+            assert page.model.newest_first is True
+            for i in range(20):
+                page.add_message(self._msg(i))
+                qapp.processEvents()
+            rows = [r["source"] for r in page.model.rows()]
+            assert rows[0] == "message 19", f"最新應在最前，實際 {rows[:3]}"
+            vp = page.list_view.viewport().rect()
+            assert vp.intersects(page.list_view.visualRect(page.model.index(0, 0))), \
+                "最新一條應可見"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_apply_display_order_switches_live(self, qapp, tmp_path):
+        """設定變更後可即時切換排列，且內容不遺失。"""
+        win = self._win(qapp, tmp_path, newest_first=False)
+        try:
+            page = win.live_page
+            for i in range(6):
+                page.add_message(self._msg(i))
+                qapp.processEvents()
+            before = [r["source"] for r in page.model.rows()]
+
+            page.apply_display_order(True)
+            qapp.processEvents()
+            after = [r["source"] for r in page.model.rows()]
+            assert page.model.newest_first is True
+            assert sorted(after) == sorted(before), "切换排列不应丢消息"
+            assert after[0] == before[-1]
+
+            page.apply_display_order(False)
+            qapp.processEvents()
+            assert page.model.newest_first is False
+            assert [r["source"] for r in page.model.rows()] == before
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_auto_scroll_disabled_does_not_force_scroll(self, qapp, tmp_path):
+        """关掉自动滚动后，不应强行把视图拉到最新。"""
+        win = self._win(qapp, tmp_path, auto_scroll=False, newest_first=False)
+        try:
+            page = win.live_page
+            for i in range(30):
+                page.add_message(self._msg(i))
+                qapp.processEvents()
+            page.list_view.verticalScrollBar().setValue(0)
+            qapp.processEvents()
+            page.add_message(self._msg(99))
+            qapp.processEvents()
+            assert page.list_view.verticalScrollBar().value() == 0, \
+                "关闭自动滚动后不应被拉到底部"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_clear_stream_resets_scroll_state(self, qapp, tmp_path):
+        win = self._win(qapp, tmp_path, newest_first=False)
+        try:
+            page = win.live_page
+            for i in range(30):
+                page.add_message(self._msg(i))
+                qapp.processEvents()
+            page.list_view.verticalScrollBar().setValue(0)
+            qapp.processEvents()
+            assert page._user_scrolled_away is True
+            page.clear_stream()
+            qapp.processEvents()
+            assert page._user_scrolled_away is False
+            assert page.model.rowCount() == 0
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_settings_roundtrip_newest_first(self, qapp, tmp_path):
+        """設定頁讀寫必須保留 newest_first。"""
+        win = self._win(qapp, tmp_path, newest_first=True)
+        try:
+            page = win.pages["settings"]
+            page.reload()
+            qapp.processEvents()
+            assert page.order_combo.currentData() == "top"
+            assert page._collect().newest_first is True
+
+            page.order_combo.setCurrentIndex(page.order_combo.findData("bottom"))
+            assert page._collect().newest_first is False
+        finally:
+            win._really_quit = True
+            win.close()
+
+
 class TestMatchSwitchNoContamination:
     """切换对局后，旧消息与旧任务不得污染新对局。"""
 

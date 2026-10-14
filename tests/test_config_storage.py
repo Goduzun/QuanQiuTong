@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,40 @@ from cs2_translator.storage import SecretStore, atomic_write_json
 @pytest.fixture
 def config_manager(tmp_path):
     return ConfigManager(data_dir=tmp_path / "data")
+
+
+class TestDataDirStability:
+    """資料目錄名稱必須穩定，且與對外顯示名解耦。
+
+    真實事故：改產品名時把 APP_NAME 一起改成 "QuanQiuTong"，結果程式跑去
+    %APPDATA%\\QuanQiuTong 這個全新的空目錄，使用者的 config.json、
+    secrets.json（API Key）與 memory.db（翻譯記憶、術語庫）全部變成孤兒資料，
+    對使用者而言就像「資料全沒了」。
+    因此 APP_NAME 必須維持 CS2ChatTranslator，只有 APP_DISPLAY_NAME 可改。
+    """
+
+    def test_app_name_is_stable(self):
+        import cs2_translator
+
+        assert cs2_translator.APP_NAME == "CS2ChatTranslator", (
+            "APP_NAME 是資料目錄名稱，不可因改產品名而變動，"
+            "否則既有使用者的資料會變成孤兒"
+        )
+
+    def test_display_name_is_decoupled(self):
+        import cs2_translator
+
+        assert cs2_translator.APP_DISPLAY_NAME == "全球通"
+
+    def test_user_data_dir_uses_app_name(self, monkeypatch, tmp_path):
+        import cs2_translator
+
+        monkeypatch.setenv("APPDATA", str(tmp_path))
+        d = user_data_dir()
+        assert d.name == cs2_translator.APP_NAME
+        assert d.parent == tmp_path
+        # 不可以是顯示名
+        assert d.name != cs2_translator.APP_DISPLAY_NAME
 
 
 class TestAppConfig:
@@ -85,8 +120,21 @@ class TestConfigManager:
         assert isinstance(candidates, list)
 
     def test_user_data_dir_is_not_exe_dir(self):
-        # 配置目录必须在用户目录，而不是 EXE 所在目录
-        assert "QuanQiuTong" in str(user_data_dir()) or "quanqiutong-cs2" in str(user_data_dir())
+        """配置目录必须在用户目录下，而不是 EXE 所在目录。
+
+        注意：这里刻意**不**断言目录名等于产品名（全球通 / QuanQiuTong）。
+        目录名是 APP_NAME，属于内部标识，改名时必须保持不变，
+        否则既有使用者的 config.json / secrets.json / memory.db 会变成孤儿数据。
+        """
+        import cs2_translator
+
+        d = user_data_dir()
+        # 必须在用户目录（APPDATA / Library / .config）之下
+        home = Path.home()
+        assert home in d.parents or str(d).startswith(str(home)), \
+            f"資料目錄 {d} 不在使用者目錄下"
+        # 不能是 exe 所在目录（打包后 exe 在 dist/ 或用户放的任意位置）
+        assert d.name == cs2_translator.APP_NAME
 
 
 class TestSecretStore:

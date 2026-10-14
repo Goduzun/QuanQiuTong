@@ -72,6 +72,9 @@ class AppConfig:
 
     # ---- 界面 ----
     auto_scroll: bool = True
+    # 实时翻译页的消息排列：False = 最新在底部（自动滚动到底）
+    #                      True  = 最新在顶部（永远第一眼看到最新）
+    newest_first: bool = False
     minimize_to_tray: bool = True
 
     # ---- 流水线 ----
@@ -175,7 +178,7 @@ class AppConfig:
         _float("log_poll_interval", 0.05, 10.0, 0.25)
         for name in (
             "read_history_on_start", "translate_enabled", "auto_suggest_reply_language",
-            "auto_scroll", "minimize_to_tray", "save_history", "first_run_completed",
+            "auto_scroll", "newest_first", "minimize_to_tray", "save_history", "first_run_completed",
             "enable_generic_name_pattern", "memory_enabled", "save_memory_history",
             "auto_cleanup_history", "auto_match_detection", "sidebar_collapsed",
             "reset_on_startup",
