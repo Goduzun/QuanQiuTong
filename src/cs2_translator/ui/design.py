@@ -207,11 +207,9 @@ QWidget {{
 QMainWindow, QDialog {{ background-color: {p.bg_root}; }}
 
 /* ============================ 字体层级 ============================ */
-QLabel#pageTitle {{
-    font-size: {t.size_xl}px;
-    font-weight: {t.weight_bold};
-    color: {p.text};
-}}
+/* 注意：pageTitle 只在顶栏使用（页面内标题已移除，避免同一页出现两次标题）。
+   它的字号在下方 topBar 区块统一定义，这里不再重复声明，
+   否则同一属性写两遍容易改一处漏一处。 */
 QLabel#sectionTitle {{
     font-size: {t.size_md}px;
     font-weight: {t.weight_bold};
@@ -281,8 +279,10 @@ QWidget#topBar {{
     border-bottom: 1px solid {p.divider};
 }}
 QWidget#topBar QLabel {{ background: transparent; }}
+/* 页面标题统一在这里定义（页面内标题已移除）：
+   它是整页的主视觉焦点，所以用最大的字级。 */
 QLabel#pageTitle {{
-    font-size: {t.size_lg}px;
+    font-size: {t.size_xl}px;
     font-weight: {t.weight_bold};
     color: {p.text};
 }}

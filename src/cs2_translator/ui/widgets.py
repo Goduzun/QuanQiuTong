@@ -163,31 +163,36 @@ class StatRow(QWidget):
 
 
 class PageHeader(QWidget):
-    """页面标题 + 副标题 + 右侧操作区。"""
+    """页面**副标题 + 右侧操作区**。
 
-    def __init__(self, title: str, subtitle: str = "", parent=None):
+    标题不在这里显示 —— 页面标题统一由外壳顶部栏（main_window 的
+    page_title_label）负责。原因是原本两处都用 objectName="pageTitle"，
+    同一页会出现两次标题、且都被放大到 24px，视觉上明显重复。
+    ``title`` 参数保留以兼容既有调用，但不再渲染。
+    """
+
+    def __init__(self, title: str = "", subtitle: str = "", parent=None):
         super().__init__(parent)
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(2)
+        self._title = title
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        self.title_label = QLabel(title)
-        self.title_label.setObjectName("pageTitle")
-        row.addWidget(self.title_label)
-        row.addStretch(1)
-
-        self.actions = QHBoxLayout()
-        self.actions.setSpacing(8)
-        row.addLayout(self.actions)
-        outer.addLayout(row)
-
+        # 副标题独占一行：和操作按钮挤在同一行时会被压到换行
+        # （实测「缓存命中率 0% · 已节省 0 次请求 · 长期记忆 - 条」会断成两行）
         self.subtitle_label = QLabel(subtitle)
         self.subtitle_label.setObjectName("hintLabel")
         self.subtitle_label.setWordWrap(True)
         self.subtitle_label.setVisible(bool(subtitle))
-        outer.addWidget(self.subtitle_label)
+        layout.addWidget(self.subtitle_label)
+
+        # 操作按钮单独一行，靠右对齐
+        self.actions = QHBoxLayout()
+        self.actions.setSpacing(8)
+        actions_row = QHBoxLayout()
+        actions_row.addStretch(1)
+        actions_row.addLayout(self.actions)
+        layout.addLayout(actions_row)
 
     def set_subtitle(self, text: str) -> None:
         self.subtitle_label.setText(text)

@@ -78,8 +78,9 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(18, 14, 18, 18)
         layout.setSpacing(12)
 
+        # 页面标题由外壳顶部栏统一显示，这里不再重复写一次「设置」。
+        # 这一行只放操作按钮（靠右）。
         head = QHBoxLayout()
-        head.addWidget(section_title("设置"))
         head.addStretch(1)
         self.save_button = primary_button("保存设置", "check")
         self.save_button.clicked.connect(self._on_save)
