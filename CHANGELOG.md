@@ -13,6 +13,24 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## English
 
+### [1.2.3] — 2026-10-22
+
+#### Added
+- **The reply box clears itself once your message actually goes out.**
+  After a translation is copied and you paste it into the game, the app watches
+  `console.log` for your own line; when it sees it, the input box is cleared so the
+  next reply can be typed straight away.
+  - Detected two ways: the sender matches the new **"My in-game name"** setting, or —
+    with that left empty — the incoming text is compared against the translation that
+    was just copied (whitespace, punctuation and case are normalised, partial matches
+    allowed).
+  - **Guarded against data loss:** the box is only cleared when an *un-sent
+    translation is pending*. Typing a draft before translating, then saying something
+    unrelated in game, leaves the draft untouched.
+
+#### Changed
+- Settings gained a **My in-game name** field under Language settings (optional).
+
 ### [1.2.2] — 2026-10-14
 
 #### Changed
@@ -147,6 +165,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## 简体中文
 
+### [1.2.3] — 2026-10-22
+
+#### 新增
+- **译文发出后，回复输入框会自动清空。**
+  翻译被复制、你粘贴到游戏发出之后，程序会盯着 `console.log` 找你自己那条消息；
+  一旦看到，就清空输入框，下一句可以直接打。
+  - 两条识别路径：发送者等于新增的「**我的游戏昵称**」设置；或留空时，
+    把收到的内容与刚复制出去的译文比对（归一化空白、标点与大小写，允许部分包含）。
+  - **防丢数据保护**：只有存在「已翻译待发出」的译文时才清空。
+    如果你只是打了个草稿还没翻译，自己在游戏里随手指一句话，草稿不会被清掉。
+
+#### 变更
+- 设置 → 语言设置 新增「**我的游戏昵称**」字段（可留空）。
+
 ### [1.2.2] — 2026-10-14
 
 #### 变更
@@ -263,6 +295,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+[1.2.3]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Goduzun/QuanQiuTong/compare/v1.1.1...v1.2.0

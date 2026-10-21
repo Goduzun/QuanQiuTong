@@ -16,7 +16,7 @@ No injection · No hooks · No memory reading · No game-file edits · **Trusted
 [![License](https://img.shields.io/badge/license-MIT-4ec9a0?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-5aa9e6?style=flat-square)](#requirements)
 [![Python](https://img.shields.io/badge/python-3.11-e0b055?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-389%20passed-4ec9a0?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-397%20passed-4ec9a0?style=flat-square)](#testing)
 
 [**English**](README.md) · [**简体中文**](README.zh-CN.md)
 
@@ -103,6 +103,12 @@ Type Chinese  →  Ctrl+Enter (or "Translate & Copy")  →  clipboard  →  Ctrl
 **This app never sends anything for you** and never simulates keystrokes. The status line
 says so explicitly — *"paste it back in-game with Ctrl+V (this app does not send
 automatically)"* — and it never claims a message was sent on your behalf.
+
+**The box then clears itself.** Once your pasted line shows up in `console.log`, the input
+is emptied so the next reply can be typed straight away. It's detected either by matching
+the **My in-game name** setting, or — with that left blank — by comparing the incoming text
+against the translation just copied. Clearing only happens while an *un-sent translation is
+pending*, so a half-typed draft is never thrown away.
 
 ### 🎯 Per-match isolation
 Each match gets its own `match_id` and a generation counter.
@@ -308,7 +314,7 @@ What the exclusions actually save (all verified by measurement):
 python -m pytest tests/ -q
 ```
 
-**389 tests**, covering log parsing, language detection, cache/lookup ordering, failure
+**397 tests**, covering log parsing, language detection, cache/lookup ordering, failure
 handling, match isolation, the reply state machine, glossary performance, and the
 packaging spec itself.
 

@@ -69,6 +69,9 @@ class AppConfig:
     # ---- 回复翻译（双向） ----
     reply_target_language: str = "en"
     auto_suggest_reply_language: bool = True
+    # 自己在游戏内的昵称。日志里出现这个发送者的消息时，说明你已经把译文
+    # 粘贴发出去了，程序据此自动清空回复输入框，方便直接输入下一句。
+    own_player_name: str = ""
 
     # ---- 界面 ----
     auto_scroll: bool = True
@@ -190,7 +193,8 @@ class AppConfig:
         for name in ("enabled_source_languages", "extra_chat_patterns"):
             _list(name)
         for name in (
-            "cs2_log_path", "api_base_url", "api_key", "model", "reply_target_language", "theme",
+            "cs2_log_path", "api_base_url", "api_key", "model", "reply_target_language",
+            "theme", "own_player_name",
         ):
             if not isinstance(getattr(self, name), str):
                 setattr(self, name, str(getattr(self, name) or ""))

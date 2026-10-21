@@ -193,6 +193,16 @@ class SettingsPage(QWidget):
             self.reply_lang_combo.addItem(f"{LANGUAGE_NAMES.get(code, code)} ({code})", code)
         form2.addRow("默认回复目标语言", self.reply_lang_combo)
 
+        # 自己在游戏内的昵称：日志里出现这个发送者的消息，说明译文已经发出去了，
+        # 程序据此自动清空回复输入框，方便直接输入下一句。
+        self.own_name_edit = QLineEdit()
+        self.own_name_edit.setPlaceholderText("填你在游戏里的名字（可留空，靠译文比对自动识别）")
+        self.own_name_edit.setToolTip(
+            "填了它之后，日志里一出现「你发的那条」就会自动清空回复输入框。\n"
+            "留空也能工作：程序会拿你刚复制的译文去比对收到的消息。"
+        )
+        form2.addRow("我的游戏昵称", self.own_name_edit)
+
         self.auto_suggest_check = QCheckBox("根据最近一条消息自动建议目标语言")
         form2.addRow("", self.auto_suggest_check)
         self.translate_check = QCheckBox("启用接收翻译（外语 → 中文）")
@@ -372,6 +382,7 @@ class SettingsPage(QWidget):
         self.enabled_langs_edit.setText(",".join(cfg.enabled_source_languages or []))
         self.set_target_language(cfg.reply_target_language)
         self.auto_suggest_check.setChecked(bool(cfg.auto_suggest_reply_language))
+        self.own_name_edit.setText(str(getattr(cfg, "own_player_name", "") or ""))
         self.translate_check.setChecked(bool(cfg.translate_enabled))
         self.read_history_check.setChecked(bool(cfg.read_history_on_start))
 
@@ -627,6 +638,7 @@ class SettingsPage(QWidget):
         cfg.enabled_source_languages = langs
         cfg.reply_target_language = self._current_target_language()
         cfg.auto_suggest_reply_language = bool(self.auto_suggest_check.isChecked())
+        cfg.own_player_name = self.own_name_edit.text().strip()
         cfg.translate_enabled = bool(self.translate_check.isChecked())
         cfg.read_history_on_start = bool(self.read_history_check.isChecked())
 

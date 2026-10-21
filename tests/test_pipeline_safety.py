@@ -749,6 +749,144 @@ class TestGlossaryPerformance:
             win.close()
 
 
+class TestOwnMessageClearsReplyInput:
+    """識別「本人剛發出的消息」→ 自動清空回覆輸入框。
+
+    真實動線：翻譯 → 自動複製 → 進遊戲 Ctrl+V 發出 → 日誌出現自己這條
+    → 輸入框已無用，清空它，下一句可以直接輸入。
+
+    兩條識別路徑：
+      1. 發送者 == 設定裡的「我的遊戲暱稱」
+      2. 沒設暱稱時，拿「剛複製的譯文」比對收到的內容
+
+    **前置條件**：必須存在待發譯文。否則使用者剛打好的草稿會被自己隨手
+    說的無關一句話清掉 —— 那是丟資料，不是便利。
+    """
+
+    @staticmethod
+    def _win(qapp, tmp_path, own_name=""):
+        from cs2_translator.config import ConfigManager
+        from cs2_translator.ui.main_window import MainWindow
+
+        cfg = AppConfig(cs2_log_path=str(tmp_path / "console.log"), api_key="sk",
+                        model="gpt-4o-mini", log_poll_interval=0.05,
+                        own_player_name=own_name)
+        win = MainWindow(cfg, ConfigManager(data_dir=tmp_path / "data"))
+        win.show()
+        win._switch_page("live")
+        qapp.processEvents()
+        return win
+
+    def test_nickname_match_clears_input(self, qapp, tmp_path):
+        win = self._win(qapp, tmp_path, own_name="Goduzun")
+        try:
+            live = win.live_page
+            live.reply_input.setPlainText("别冲，先架枪")
+            live.show_reply_result({"ok": True, "translated": "Don't push, hold"})
+            assert live.reply_input.toPlainText() == "别冲，先架枪"
+
+            assert live.note_incoming_for_own_reply("Goduzun", "Don't push, hold") is True
+            assert live.reply_input.toPlainText() == "", "本人發言後應清空輸入框"
+            assert live._reply_state == "sent"
+            assert "已清空" in live.state_label.text()
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_nickname_match_is_case_insensitive(self, qapp, tmp_path):
+        win = self._win(qapp, tmp_path, own_name="Goduzun")
+        try:
+            live = win.live_page
+            live.reply_input.setPlainText("草稿")
+            live.show_reply_result({"ok": True, "translated": "hello"})
+            assert live.note_incoming_for_own_reply("GODUZUN", "hello") is True
+            assert live.reply_input.toPlainText() == ""
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_translation_text_match_without_nickname(self, qapp, tmp_path):
+        """沒設暱稱時，靠剛複製的譯文比對（容忍空白與大小寫差異）。"""
+        win = self._win(qapp, tmp_path, own_name="")
+        try:
+            live = win.live_page
+            live.reply_input.setPlainText("转点，快点")
+            live.show_reply_result({"ok": True, "translated": "Rotate now, hurry up"})
+            assert live.note_incoming_for_own_reply(
+                "SomePlayer", "rotate  now,  hurry up") is True
+            assert live.reply_input.toPlainText() == ""
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_unrelated_message_keeps_draft(self, qapp, tmp_path):
+        win = self._win(qapp, tmp_path, own_name="Goduzun")
+        try:
+            live = win.live_page
+            live.reply_input.setPlainText("别冲，先架枪")
+            live.show_reply_result({"ok": True, "translated": "Don't push, hold"})
+            assert live.note_incoming_for_own_reply("Other", "rush b fast") is False
+            assert live.reply_input.toPlainText() == "别冲，先架枪"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_no_pending_translation_never_clears(self, qapp, tmp_path):
+        """沒有任何待發譯文時，即使本人發言也不得清空草稿。
+
+        這是防「丟資料」的關鍵：使用者剛打了一半，自己在遊戲裡隨手說句話，
+        不能被清掉。使用者的原話也是「翻译之后复制粘贴之后」再清空。
+        """
+        win = self._win(qapp, tmp_path, own_name="Goduzun")
+        try:
+            live = win.live_page
+            live.reply_input.setPlainText("我打中路")
+            assert live.note_incoming_for_own_reply("Goduzun", "hello") is False
+            assert live.reply_input.toPlainText() == "我打中路"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_clearing_resets_state_for_next_input(self, qapp, tmp_path):
+        """清空後狀態歸零，下一句可以重新走「翻譯並複製」。"""
+        win = self._win(qapp, tmp_path, own_name="Goduzun")
+        try:
+            live = win.live_page
+            live.reply_input.setPlainText("第一句")
+            live.show_reply_result({"ok": True, "translated": "first"})
+            live.note_incoming_for_own_reply("Goduzun", "first")
+            assert live._last_reply_translation == "", "清空後不該殘留舊譯文"
+
+            copied = []
+            live.copy_requested.connect(copied.append)
+            live.reply_input.setPlainText("第二句")
+            live._on_reply_translate()
+            live.show_reply_result({"ok": True, "translated": "second"})
+            assert copied == ["second"], "下一句應能正常翻譯並自動複製"
+            assert live._reply_state == "copied"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_settings_roundtrip_own_player_name(self, qapp, tmp_path):
+        win = self._win(qapp, tmp_path, own_name="")
+        try:
+            page = win.pages["settings"]
+            page.reload()
+            qapp.processEvents()
+            assert page.own_name_edit.text() == ""
+
+            page.own_name_edit.setText("  MyNick  ")
+            assert page._collect().own_player_name == "MyNick", "應去掉前後空白"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_config_default_is_empty(self):
+        cfg = AppConfig()
+        assert cfg.own_player_name == "", "預設應為空（改走譯文比對）"
+
+
 class TestUpdateCheck:
     """啟動檢查更新的版本比較邏輯。
 

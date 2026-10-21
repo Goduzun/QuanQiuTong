@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/license-MIT-4ec9a0?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-5aa9e6?style=flat-square)](README.zh-CN.md)
 [![Python](https://img.shields.io/badge/python-3.11-e0b055?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-389%20passed-4ec9a0?style=flat-square)](#测试)
+[![Tests](https://img.shields.io/badge/tests-397%20passed-4ec9a0?style=flat-square)](#测试)
 
 [**English**](README.md) · [**简体中文**](README.zh-CN.md)
 
@@ -48,6 +48,11 @@
 **本工具不会自动发送、也不模拟按键** —— 状态提示会明确写着
 「切回游戏按 Ctrl+V 粘贴即可发送（本程序不会自动发送）」，
 绝不声称已经替你发送过。
+
+**发出去之后输入框会自己清空。** 你粘贴发出的那条出现在 `console.log` 里时，
+输入框自动清掉，下一句直接打。识别有两种：比对设置里的「**我的游戏昵称**」，
+或（留空时）拿收到的内容与刚复制出去的译文比对。
+**只有存在「已翻译待发出」的译文时才清空** —— 只打了草稿还没翻译时，草稿不会被清掉。
 
 ### 六级查找（省钱）
 

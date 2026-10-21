@@ -482,6 +482,16 @@ class MainWindow(QMainWindow):
             "raw": message.raw or "",
         })
         self.live_page.refresh_match_info()
+        # 若这条是「本人刚发出的」——说明译文已经粘贴发出去了，
+        # 清空回复输入框，让使用者可以直接输入下一句。
+        try:
+            if self.live_page.note_incoming_for_own_reply(
+                message.sender or "", message.content or ""
+            ):
+                logger.info("检测到本人发言，已清空回复输入框")
+                return
+        except Exception:
+            logger.exception("处理本人发言时出错")
         # 依据最近一条消息建议回复目标语言
         try:
             suggested = self.controller.suggest_reply_language()

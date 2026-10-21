@@ -58,6 +58,18 @@ CARD_PADDING_H = 12
 LINE_SPACING = 4
 
 
+def _normalize_for_match(text: str) -> str:
+    """归一化文本，用于「自己发出的消息」与「刚复制的译文」比对。
+
+    去掉空白、引号与常见标点，统一小写。这样即使游戏里粘贴时多了空格，
+    或者在首尾带了引号，也仍然能认出来是同一条内容。
+    """
+    if not text:
+        return ""
+    drop = set(" \t\r\n\u00a0\"'“”‘’「」『』.,!?;:、。，！？；：…-—_()（）[]【】")
+    return "".join(ch for ch in str(text).casefold() if ch not in drop)
+
+
 class MessageStreamModel(QAbstractListModel):
     """消息流模型：持有当前对局的显示记录。
 
@@ -790,6 +802,56 @@ class LivePage(QWidget):
         self._refresh_state_label()
 
     # ------------------------------------------------------------------
+    # 识别「自己发出的消息」→ 清空回复输入框
+    # ------------------------------------------------------------------
+    def note_incoming_for_own_reply(self, sender: str, content: str) -> bool:
+        """若这条消息是「本人刚发出的」，就清空回复输入框。
+
+        真实动线：翻译 → 自动复制 → 进游戏 Ctrl+V 发出 → 日志里出现自己这条
+        → 此时输入框已经没用了，清空它，下一句可以直接输入。
+
+        返回是否清空了输入框（方便调用方打日志/测试断言）。
+
+        两种识别方式，任一命中即算自己发的：
+          1. 发送者等于设置里的「我的游戏昵称」(config.own_player_name)
+          2. 没有配置昵称时，把消息内容和「刚翻译出来的那段译文」比对
+             （归一化后相等/互相包含即视为命中）
+        第 2 种是兜底：使用者往往懒得填昵称，而刚复制出去的译文是已知的。
+
+        **前置条件**：必须存在「已翻译并复制待发出」的译文。
+        否则使用者刚打了草稿还没翻译，自己在游戏里随手说句话就会把草稿清掉 ——
+        那是丢数据，不是便利。使用者的原话也是「翻译之后复制粘贴之后」再清空。
+        """
+        if not (self._last_reply_translation or "").strip():
+            return False
+        if not self._looks_like_own_message(sender, content):
+            return False
+
+        had_text = bool(self.reply_input.toPlainText().strip())
+        self.reply_input.clear()
+        self.reply_result_label.setVisible(False)
+        self._last_reply_translation = ""
+        self._reply_state = "sent"
+        self._refresh_state_label()
+        return had_text or True
+
+    def _looks_like_own_message(self, sender: str, content: str) -> bool:
+        """判断一条聊天消息是否出自本人。"""
+        own = str(getattr(self.context.config, "own_player_name", "") or "").strip()
+        if own and str(sender or "").strip().casefold() == own.casefold():
+            return True
+
+        # 兜底：与刚发出的译文比对
+        last = str(self._last_reply_translation or "").strip()
+        if not last:
+            return False
+        a = _normalize_for_match(content)
+        b = _normalize_for_match(last)
+        if not a or not b:
+            return False
+        return b == a or b in a or a in b
+
+    # ------------------------------------------------------------------
     # 回复状态提示
     # ------------------------------------------------------------------
     def mark_copied(self) -> None:
@@ -808,6 +870,7 @@ class LivePage(QWidget):
         p = active_palette()
         dot = {
             "copied": p.success,
+            "sent": p.info,
             "translating": p.warning,
             "failed": p.danger,
             "empty": p.text_faint,
@@ -817,6 +880,10 @@ class LivePage(QWidget):
             main = "译文已复制到剪贴板"
             sub = "切回游戏按 Ctrl+V 粘贴即可发送（本程序不会自动发送）"
             main_color = p.success
+        elif self._reply_state == "sent":
+            main = "已识别到你发出这条消息，输入框已清空"
+            sub = "可以直接输入下一句"
+            main_color = p.info
         elif self._reply_state == "translating":
             main = "正在翻译…"
             sub = ""
