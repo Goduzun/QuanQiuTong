@@ -1,4 +1,4 @@
-# Changelog · 更新日志
+﻿# Changelog · 更新日志
 
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
@@ -12,6 +12,45 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ---
 
 ## English
+
+### [1.2.5] — 2026-10-25
+
+Fixes for the reported **CS2 AppHangB1 / "not responding"** issue.
+
+> Supersedes an unreleased 1.2.4 local build. 1.2.4 contained the fixes below but
+> introduced a hang on *its own* shutdown (UI thread blocked up to 22 s); 1.2.5 fixes that.
+
+#### Added
+- **Single-instance lock.** A second launch now wakes the existing window and exits
+  instead of running a duplicate. Two instances had been observed running side by side
+  (one accumulated 877 s of CPU over 2 days), doubling file polling and UI redraws.
+- **Foreground awareness.** While `cs2.exe` is the foreground window the app raises its
+  log poll interval (0.25 s → 1.5 s), stops the 1 s status refresh, and defers rendering.
+  Messages are still queued and are rendered in one pass when you come back.
+
+#### Changed
+- Startup API self-check uses a **5 s timeout with no retries** instead of reusing the
+  20 s translation timeout.
+- Memory statistics are cached for 5 s instead of querying SQLite every second, and the
+  header subtitle is only rewritten when the text actually changes. (The 1 s cadence was a
+  likely contributor to the 1989-handle count seen on site.)
+
+#### Fixed
+- **Log reads back off on failure.** A missing or recreated `console.log` used to be
+  retried every 250 ms indefinitely; now 250 ms → 500 ms → 1 s → 2 s, reset on success.
+- **Shutdown no longer blocks the UI thread.** `engine.stop()` could block for 22 s
+  (10 s watcher + 10 s queue + pool join), which Windows reports as AppHang — this is what
+  produced `程序全球通.exe 停止与 Windows 交互并已关闭`. The window is now hidden first,
+  each step is capped at 1.5 s, and the callback pool is no longer waited on.
+- Packaging: `Qt6Network` had been stripped by the slimming list, which breaks
+  `QLocalServer` and made the packaged build fail at import. It is kept now, together with
+  the tiny `qoffscreen` platform plugin (enables headless verification without popping
+  windows onto the desktop).
+
+#### Note on root cause
+Event-log correlation over 7 days shows `cs2.exe` **also hung while this app was not
+running at all** (2026-10-20 21:45). The changes above substantially reduce this app's
+footprint, but CS2 hangs are not attributable to this app alone.
 
 ### [1.2.3] — 2026-10-22
 
@@ -165,6 +204,39 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## 简体中文
 
+### [1.2.5] — 2026-10-25
+
+修复反馈的 **CS2 AppHangB1 /「无响应」** 问题。
+
+> 取代未发布的本地 1.2.4。1.2.4 已含下方修复，但引入了**自身关闭时卡死**
+> （UI 线程被阻塞最长 22 秒）；1.2.5 修掉这个问题。
+
+#### 新增
+- **单实例锁。** 第二次启动会唤醒已有窗口并自行退出，不再跑重复实例。现场曾同时
+  运行两份（其中一份 2 天累计 877 秒 CPU），文件轮询与 UI 重绘都翻倍。
+- **前台感知。** `cs2.exe` 在前台时，日志轮询间隔从 0.25 秒提到 1.5 秒、停掉每秒的
+  状态刷新、并延后渲染；消息仍照常入队，回到桌面一次性补齐。
+
+#### 变更
+- 启动自检 API 改用 **5 秒超时且不重试**，不再沿用翻译主路径的 20 秒。
+- 缓存统计改为 5 秒缓存，不再每秒查一次 SQLite；副标题只在文字真的变化时才重写。
+  （每秒一次的节奏是现场 1989 个句柄的嫌疑来源之一。）
+
+#### 修复
+- **日志读取失败会指数退避。** 原本文件缺失或被重建时按 250 毫秒无限重试；
+  现在 250ms → 500ms → 1s → 2s，成功后复位。
+- **关闭不再阻塞 UI 线程。** `engine.stop()` 原本最坏阻塞 22 秒
+  （watcher 10 秒 + 队列 10 秒 + 线程池等待），Windows 会判为 AppHang ——
+  这正是事件日志里「程序全球通.exe 停止与 Windows 交互并已关闭」的来源。
+  现在先隐藏窗口、每步上限 1.5 秒、不再等待回调线程池。
+- 打包：瘦身清单误删了 `Qt6Network`，导致 `QLocalServer` 不可用、打包版启动即
+  ImportError。现已保留，并额外保留极小的 `qoffscreen` 平台插件
+  （可在不弹出窗口的情况下做自动化验收）。
+
+#### 关于根因
+比对近 7 天事件日志：**本程序完全没运行时，`cs2.exe` 也发生过 AppHang**
+（2026-10-20 21:45）。上述改动大幅降低了本程序的占用，但 CS2 卡顿不能单独归因于本程序。
+
 ### [1.2.3] — 2026-10-22
 
 #### 新增
@@ -295,6 +367,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+[1.2.5]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.3...v1.2.5
 [1.2.3]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.0...v1.2.1

@@ -21,7 +21,7 @@ from pathlib import Path
 # 保证以脚本方式运行时可以找到包
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from cs2_translator import APP_DISPLAY_NAME, __version__  # noqa: E402
+from cs2_translator import APP_DISPLAY_NAME, APP_NAME, __version__  # noqa: E402
 from cs2_translator.chat_parser import ChatParser  # noqa: E402
 from cs2_translator.config import ConfigManager, user_data_dir  # noqa: E402
 from cs2_translator.engine import TranslationEngine  # noqa: E402
@@ -223,6 +223,7 @@ def _run_gui(config, config_manager) -> int:
         print("请使用 --cli 命令行模式，或执行: pip install PySide6")
         return 4
 
+    from cs2_translator.single_instance import SingleInstanceGuard, instance_key
     from cs2_translator.ui.design import build_stylesheet, set_active_theme
     from cs2_translator.ui.main_window import MainWindow
     from cs2_translator.ui.settings_dialog import SettingsDialog
@@ -232,6 +233,15 @@ def _run_gui(config, config_manager) -> int:
     app.setStyle("Fusion")
     palette = set_active_theme(getattr(config, "theme", "dark"))
     app.setStyleSheet(build_stylesheet(palette))
+
+    # 单实例：必须在任何窗口/引擎创建**之前**判断。
+    # 现场曾同时跑着 2 份实例（onefile 的 bootloader + 主进程成对，共 4 个进程），
+    # 各自每 250ms 轮询 console.log、各自每秒刷新 UI、各自一个托盘图标。
+    guard = SingleInstanceGuard(instance_key(APP_NAME))
+    if not guard.try_acquire():
+        # 已有实例：try_acquire 里已经发过唤醒指令，本进程直接退出
+        print(f"{APP_DISPLAY_NAME} 已在运行，已请求显示已有窗口。")
+        return 0
 
     if config.is_first_run:
         QMessageBox.information(
@@ -243,17 +253,23 @@ def _run_gui(config, config_manager) -> int:
         )
         dialog = SettingsDialog(config_manager, config, first_run=True)
         if not dialog.exec():
+            guard.release()
             return 0
         config = config_manager.load()
 
-    window = MainWindow(config, config_manager)
+    window = MainWindow(config, config_manager, instance_guard=guard)
     window.show()
 
     def handle_sigint(*_args):
         window._on_quit()
 
     signal.signal(signal.SIGINT, handle_sigint)
-    return app.exec()
+    # 退出时释放单实例锁，避免下次启动因为残留 endpoint 而误判
+    app.aboutToQuit.connect(guard.release)
+    try:
+        return app.exec()
+    finally:
+        guard.release()
 
 
 # ---------------------------------------------------------------- main

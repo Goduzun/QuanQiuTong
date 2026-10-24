@@ -18,7 +18,8 @@
 #                                 （实测 PE 汇入表，版本 OpenSSL 1.1.1u）；
 #                                 移除后 openai 无法 import，翻译功能全废
 #   5. translations      6.56 MB  99 个语言档只留 zh_CN
-#   6. Qt6OpenGL/Network 3.60 MB  仅被 Quick/Pdf/Qml 依赖，全都移除
+#   6. Qt6OpenGL         0.0x MB  仅被 Quick/Pdf/Qml 依赖，移除
+#      （Qt6Network 已保留：单实例锁需要它，见下方 BINARY_DROP 注记）
 #   7. 多余外挂          3.30 MB  imageformats/platforms/tls 只留必需
 #
 # 验证方式：--version / --diagnose（真实 12594 行日志）/ GUI 存活 45 秒 /
@@ -53,7 +54,9 @@ EXCLUDES = [
     "PySide6.QtScxml", "PySide6.QtSpatialAudio", "PySide6.QtTextToSpeech",
     "PySide6.QtWebSockets", "PySide6.QtHttpServer", "PySide6.QtGraphs",
     "PySide6.QtGraphsWidgets", "PySide6.QtSql", "PySide6.QtTest",
-    "PySide6.QtUiTools", "PySide6.QtSvgWidgets", "PySide6.QtNetwork",
+    "PySide6.QtUiTools", "PySide6.QtSvgWidgets",
+    # ⚠ 绝对不要排除 PySide6.QtNetwork / Qt6Network —— 单实例锁用
+    #   QLocalServer/QLocalSocket，砍掉会让打包版启动时 ImportError。
     "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
 ]
 
@@ -61,7 +64,8 @@ EXCLUDES = [
 BINARY_DROP = (
     "opengl32sw",
     "Qt6Quick", "Qt6Qml", "Qt6ShaderTools", "Qt6Labs", "Qt6Graphs",
-    "Qt6Pdf", "Qt6Designer", "Qt6OpenGL", "Qt6OpenGLWidgets", "Qt6Network",
+    "Qt6Pdf", "Qt6Designer", "Qt6OpenGL", "Qt6OpenGLWidgets",
+    # ⚠ 绝不可排除 Qt6Network：单实例锁（QLocalServer）依赖它。
     "Qt6WebEngine", "Qt6WebChannel", "Qt6WebSockets", "Qt6Multimedia",
     "Qt6Charts", "Qt6DataVisualization", "Qt6Bluetooth", "Qt6Nfc",
     "Qt6Positioning", "Qt6SerialPort", "Qt6Sql", "Qt6Test", "Qt6Help",
@@ -100,9 +104,18 @@ a = Analysis(
 )
 
 # 过滤 binaries：移除未使用的 DLL / 外挂
+# 例外：platforms/qoffscreen.dll 必须保留。它只有几十 KB，但能让打包后的
+# 程序以 QT_QPA_PLATFORM=offscreen 无窗口运行 —— 这样自动化验收（尤其是
+# 「连点两次只存活一份实例」这种必须真实启动进程的测试）就不用真的把窗口
+# 弹到使用者桌面上。曾经因为缺这个插件，验证时弹出 Qt 致命错误对话框。
+_KEEP_ALWAYS = ("qoffscreen",)
 _new_binaries = []
 _dropped_binaries = []
 for _dest, _src, _kind in a.binaries:
+    _name = Path(_dest).name.lower()
+    if any(_tok in _name for _tok in _KEEP_ALWAYS):
+        _new_binaries.append((_dest, _src, _kind))
+        continue
     if any(_tok.lower() in Path(_dest).name.lower() for _tok in BINARY_DROP):
         _dropped_binaries.append(_dest)
         continue

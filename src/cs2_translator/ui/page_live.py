@@ -392,6 +392,10 @@ class LivePage(QWidget):
         # 用旗标追踪而不是每次由 value/maximum 现算：消息刚插入时滚动条
         # 范围尚未更新，现算会把「其实还在底部」误判为「已离开」。
         self._user_scrolled_away = False
+        # CS2 在前台时暂停非必要 UI 更新：消息仍照常入队（数据不丢），
+        # 回到桌面后一次性补齐渲染，避免在游戏全屏时持续重绘。
+        self._updates_suspended = False
+        self._pending_flush = False
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -615,9 +619,43 @@ class LivePage(QWidget):
     # ------------------------------------------------------------------
     # 消息流
     # ------------------------------------------------------------------
+    def set_live_updates_suspended(self, suspended: bool) -> None:
+        """暂停/恢复实时页的非必要 UI 更新。
+
+        CS2 在前台（尤其全屏）时暂停：外部窗口持续重绘会打断游戏的独占全屏
+        swapchain，表现为 CS2 周期性「无响应」。暂停期间消息仍然进入 model
+        （数据完整、不漏不重），只是不做滚动、不刷计数、不重排布局。
+        """
+        suspended = bool(suspended)
+        if suspended == self._updates_suspended:
+            return
+        self._updates_suspended = suspended
+        if suspended:
+            self._pending_flush = True
+
+    @property
+    def updates_suspended(self) -> bool:
+        return self._updates_suspended
+
+    def flush_suspended_updates(self) -> None:
+        """恢复渲染：一次性补齐暂停期间累积的变化。"""
+        if not self._pending_flush:
+            return
+        self._pending_flush = False
+        self.update_stream_hint()
+        self.refresh_match_info()
+        if self.model.rowCount() > 0:
+            self.empty_state.setVisible(False)
+            self.list_view.setVisible(True)
+        self._maybe_autoscroll()
+
     def add_message(self, record: dict) -> None:
         """追加一条待翻译消息（原文立即可见，译文稍后回填）。"""
         self.model.append(record)
+        if self._updates_suspended:
+            # 只入队，不渲染；等回到桌面一次补齐
+            self._pending_flush = True
+            return
         self.empty_state.setVisible(False)
         self.list_view.setVisible(True)
         self.update_stream_hint()
@@ -628,6 +666,9 @@ class LivePage(QWidget):
         if row_index < 0:
             return
         self.model.update_row(row_index, translated, hit_kind, state)
+        if self._updates_suspended:
+            self._pending_flush = True
+            return
         self.update_stream_hint()
 
     def apply_display_order(self, newest_first: bool) -> None:

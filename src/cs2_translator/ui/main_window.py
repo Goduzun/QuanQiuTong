@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -66,11 +67,26 @@ PAGE_TITLES = {key: label for key, label, _ in NAV_ITEMS}
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config: AppConfig, config_manager: ConfigManager, parent=None):
+    # CS2 在前台时的日志轮询间隔。翻译延迟 1.5s 对聊天完全够用，
+    # 而文件系统活动降到原配置（默认 0.25s）的 1/6。
+    CS2_ACTIVE_POLL_INTERVAL = 1.5
+    # 启动自检的 API 超时：不要沿用翻译的 20s
+    STARTUP_API_TIMEOUT = 5.0
+
+    def __init__(self, config: AppConfig, config_manager: ConfigManager, parent=None,
+                 instance_guard=None):
         super().__init__(parent)
         self.config = config
         self.config_manager = config_manager
         self._really_quit = False
+        # 前台感知状态：True = CS2 在全屏/前台，需要降频并暂停非必要 UI 更新
+        self._cs2_active = False
+        # 缓存统计的 TTL 与快照。状态栏每秒刷新，但 memory_stats() 是一次 DB 查询，
+        # 每秒查一次既浪费又是句柄数异常偏高的嫌疑来源之一。
+        self._stats_cache: dict | None = None
+        self._stats_cache_at = 0.0
+        self._stats_cache_ttl = 5.0
+        self._instance_guard = instance_guard
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.setMinimumSize(940, 620)
@@ -103,10 +119,73 @@ class MainWindow(QMainWindow):
 
         self._switch_page("live")
         self._refresh_status()
+        # 单实例守卫：第二个实例启动时，把本实例的窗口拉到前台
+        self._wire_instance_guard()
+        # 前台感知：CS2 在全屏时降频并暂停非必要 UI 更新
+        self._start_foreground_monitor()
         # 启动后自动测一次 API（已有 key 才测）
         self._schedule_startup_api_check()
         # 启动后检查更新（可在设置里关闭）
         self._schedule_update_check()
+
+    # ------------------------------------------------------------------
+    # 单实例 / 前台感知
+    # ------------------------------------------------------------------
+    def _wire_instance_guard(self) -> None:
+        guard = self._instance_guard
+        if guard is None:
+            return
+        try:
+            guard.activated.connect(self._on_second_instance)
+        except Exception:
+            logger.exception("连接单实例信号失败")
+
+    def _on_second_instance(self) -> None:
+        """另一个实例被启动：把本窗口显示出来并置前。"""
+        logger.info("收到第二实例唤醒，显示主窗口")
+        self._on_show_window()
+
+    def _start_foreground_monitor(self) -> None:
+        """启动前台监视器（1.5s 一次）。
+
+        只在状态翻转时才动 UI/轮询，不会自己变成新的高频源。
+        """
+        try:
+            from ..foreground import ForegroundMonitor
+
+            self._foreground_monitor = ForegroundMonitor(parent=self)
+            self._foreground_monitor.state_changed.connect(self._on_cs2_foreground_changed)
+            self._foreground_monitor.start()
+        except Exception:
+            logger.exception("启动前台监视失败")
+            self._foreground_monitor = None
+
+    def _on_cs2_foreground_changed(self, active: bool) -> None:
+        """CS2 进入/离开前台：降频 + 暂停非必要 UI 更新。
+
+        这是本次修复的核心一条 —— 直接消除「外部窗口在 CS2 全屏时持续重绘与活动」。
+        暂停期间消息照常入队（数据不丢），回到桌面时一次性补齐渲染。
+        """
+        active = bool(active)
+        if active == self._cs2_active:
+            return
+        self._cs2_active = active
+        try:
+            if active:
+                logger.info("CS2 进入前台：降频轮询并暂停 UI 刷新")
+                self._status_timer.stop()
+                self.controller.set_poll_interval(self.CS2_ACTIVE_POLL_INTERVAL)
+                self.live_page.set_live_updates_suspended(True)
+            else:
+                logger.info("CS2 离开前台：恢复正常轮询并补齐渲染")
+                self.controller.set_poll_interval(self.config.log_poll_interval)
+                self.live_page.set_live_updates_suspended(False)
+                self.live_page.flush_suspended_updates()
+                self._invalidate_stats_cache()
+                self._status_timer.start()
+                self._refresh_status()
+        except Exception:
+            logger.exception("切换前台模式失败")
 
     # ==================================================================
     # 外壳构建
@@ -371,8 +450,14 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1500, self._auto_check_api)
 
     def _auto_check_api(self) -> None:
+        """启动自检：用短超时（5s），不沿用翻译的 20s。
+
+        即使 test_api 已经在后台线程里跑（UI 不会被冻住），自检用的是
+        「一次性短超时 + 不重试」，这样最坏情况 5 秒内必有结论，
+        不会让一个后台线程拿 20 秒在那等。
+        """
         try:
-            self.controller.test_api()
+            self.controller.test_api(timeout=self.STARTUP_API_TIMEOUT)
         except Exception:
             logger.exception("启动自动测试 API 失败")
 
@@ -784,15 +869,41 @@ class MainWindow(QMainWindow):
 
         # 缓存状态展示在实时页副标题
         try:
-            stats = self.context.memory_stats()
+            stats = self._cached_memory_stats()
             rate = stats.get("cache_hit_rate", 0.0) * 100
             saved = stats.get("saved_requests", 0)
-            self.live_page.header.set_subtitle(
+            subtitle = (
                 f"缓存命中率 {rate:.0f}% · 已节省 {saved} 次请求 · "
                 f"长期记忆 {stats.get('memory_count', '-')} 条"
             )
+            # 只在文字真的变化时才 setText：QLabel.setText 会触发布局与重绘，
+            # 每秒无条件写一次等于每秒强制重绘一次表头。
+            if self.live_page.header.subtitle_label.text() != subtitle:
+                self.live_page.header.set_subtitle(subtitle)
         except Exception:
             pass
+
+    # ------------------------------------------------------------------
+    def _invalidate_stats_cache(self) -> None:
+        """让下一次 _refresh_status 重新查一次统计。"""
+        self._stats_cache = None
+        self._stats_cache_at = 0.0
+
+    def _cached_memory_stats(self) -> dict:
+        """带 TTL 的统计快照。
+
+        状态栏每秒刷新，但 memory_stats() 每次都做一次 DB 查询（并在引擎侧
+        聚合）。实测现场单进程句柄数到过 1989（正常 300~800），每秒一次的
+        查询是被怀疑的来源之一。这里把频率降到每 5 秒最多一次。
+        """
+        now = time.monotonic()
+        if (self._stats_cache is not None
+                and now - self._stats_cache_at < self._stats_cache_ttl):
+            return self._stats_cache
+        stats = self.context.memory_stats() or {}
+        self._stats_cache = stats
+        self._stats_cache_at = now
+        return stats
 
     @staticmethod
     def _short_path(path: str) -> str:
@@ -854,7 +965,30 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def _shutdown(self) -> None:
+        """关闭流程。
+
+        ⚠ 顺序很重要：**先把窗口藏起来**，再做耗时的收尾。
+
+        真实事故：engine.stop() 原本最坏可阻塞 UI 线程 22 秒，Windows 对超过
+        5 秒不响应的窗口判 AppHang，事件日志出现
+        「程序全球通.exe 停止与 Windows 交互并已关闭」（用户实际碰到过）。
+        现在：① 立刻隐藏窗口（没有可见窗口就不会被判 AppHang）
+             ② 停掉所有定时器，避免收尾期间再触发数据库查询
+             ③ 引擎停止用短上限（见 engine.stop）
+        """
         self._status_timer.stop()
+        # 前台监视器也要停，否则收尾期间还会去查前台窗口
+        monitor = getattr(self, "_foreground_monitor", None)
+        if monitor is not None:
+            try:
+                monitor.stop()
+            except Exception:
+                logger.debug("停止前台监视失败", exc_info=True)
+        # 先藏窗口：AppHang 判定的是「可见窗口停止响应」
+        try:
+            self.hide()
+        except Exception:
+            logger.debug("隐藏窗口失败", exc_info=True)
         # 停止各页面的延迟定时器（搜寻防抖等）。
         # 否则它们可能在引擎关闭后触发，对已关闭的数据库查询。
         for page in getattr(self, "pages", {}).values():
@@ -869,7 +1003,7 @@ class MainWindow(QMainWindow):
         if worker is not None and worker.isRunning():
             try:
                 worker.quit()
-                worker.wait(3000)
+                worker.wait(1000)
             except Exception:
                 logger.exception("等待更新检查线程结束失败")
         # 结束当前对局，保证历史对局的 ended_at 被正确写入
@@ -878,9 +1012,16 @@ class MainWindow(QMainWindow):
                 self.context.matches.end_current_match()
         except Exception:
             logger.exception("结束对局失败")
+        # 短上限：整段收尾必须远低于 Windows 的 5 秒 AppHang 阈值
+        started = time.monotonic()
         try:
-            self.controller.stop()
+            self.controller.stop(timeout=1.5)
         except Exception:
             logger.exception("停止引擎失败")
+        elapsed = time.monotonic() - started
+        if elapsed > 3.0:
+            logger.warning("关闭耗时才 %.1fs，接近 AppHang 阈值，需继续优化", elapsed)
+        else:
+            logger.info("关闭耗时 %.2fs", elapsed)
         if self.tray_icon is not None:
             self.tray_icon.hide()

@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 
 <img src="docs/screenshots/icon.png" width="132" alt="全球通">
 
@@ -16,7 +16,7 @@
 [![License](https://img.shields.io/badge/license-MIT-4ec9a0?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-5aa9e6?style=flat-square)](README.zh-CN.md)
 [![Python](https://img.shields.io/badge/python-3.11-e0b055?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-397%20passed-4ec9a0?style=flat-square)](#测试)
+[![Tests](https://img.shields.io/badge/tests-431%20passed-4ec9a0?style=flat-square)](#测试)
 
 [**English**](README.md) · [**简体中文**](README.zh-CN.md)
 

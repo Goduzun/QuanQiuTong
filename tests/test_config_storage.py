@@ -61,6 +61,27 @@ class TestPackagingSpec:
         for must in ("QtCore", "QtGui", "QtWidgets"):
             assert f'"PySide6.{must}"' not in text, f"{must} 是必需模組，不該被排除"
 
+    def test_spec_keeps_qtnetwork_for_single_instance(self):
+        """QtNetwork 不得被排除 —— 單實例鎖用 QLocalServer/QLocalSocket。
+
+        真實事故：瘦身清單把 PySide6.QtNetwork 與 Qt6Network 一起移除，
+        本機以原始碼跑測試完全正常（模組從 site-packages 載入），
+        但**打包版一啟動就 ImportError**，單實例保護直接失效。
+        這種「只在打包後才炸」的缺陷必須靠 spec 靜態檢查擋住。
+        """
+        text = self._spec_text()
+        assert '"PySide6.QtNetwork"' not in text, \
+            "spec 排除了 PySide6.QtNetwork，單實例鎖會失效並導致打包版啟動失敗"
+        assert '"Qt6Network"' not in text, \
+            "spec 排除了 Qt6Network DLL，QLocalServer 無法運作"
+
+    def test_single_instance_module_imports(self):
+        """單實例模組必須可 import（含 QtNetwork）。"""
+        from cs2_translator.single_instance import SingleInstanceGuard, instance_key
+
+        assert callable(SingleInstanceGuard)
+        assert callable(instance_key)
+
     def test_diagnose_self_check_covers_deps(self):
         """app.py 的 --diagnose 必須自檢 ssl 與 openai。"""
         app = (PROJECT_ROOT / "app.py").read_text(encoding="utf-8")

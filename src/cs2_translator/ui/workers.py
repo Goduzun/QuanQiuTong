@@ -49,8 +49,9 @@ class EngineController(QObject):
     def start(self) -> None:
         self.engine.start()
 
-    def stop(self) -> None:
-        self.engine.stop()
+    def stop(self, timeout: float = 10.0) -> None:
+        """停止引擎。``timeout`` 是每一步的上限，关闭流程会用很短的値。"""
+        self.engine.stop(timeout=timeout)
 
     # ---------------- 回复翻译 ----------------
     def translate_reply(self, text: str, target_language: str) -> None:
@@ -65,6 +66,10 @@ class EngineController(QObject):
     # ---------------- 控制 ----------------
     def set_paused(self, paused: bool) -> None:
         self.engine._queue.set_paused(paused)
+
+    def set_poll_interval(self, seconds: float) -> None:
+        """调整日志轮询间隔（前台是 CS2 时降频）。"""
+        self.engine.set_poll_interval(seconds)
 
     # ---------------- 翻译记忆库 ----------------
     def memory_stats(self) -> dict:
@@ -94,10 +99,16 @@ class EngineController(QObject):
         return self.engine.find_memory_id(text, target_language, direction)
 
     # ---------------- 测试（放后台线程，避免阻塞 UI） ----------------
-    def test_api(self) -> None:
+    def test_api(self, timeout: float | None = None) -> None:
+        """测试 API。
+
+        一律在后台线程执行 —— UI 线程绝不能被网络请求占住（Windows 对超过 5 秒
+        不响应消息的窗口就判 AppHang）。``timeout`` 供启动自检用短超时。
+        """
+
         def work():
             try:
-                ok, message = self.engine.test_api()
+                ok, message = self.engine.test_api(timeout=timeout)
             except Exception as exc:  # noqa: BLE001
                 ok, message = False, f"测试失败: {exc}"
             self.signals.api_test_done.emit(ok, message)

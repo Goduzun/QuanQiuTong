@@ -129,6 +129,17 @@ class LogWatcher(threading.Thread):
         self._waiting_emitted = False
         self._force_from_start_next = False
 
+        # 打开失败的指数退避。
+        # 为什么需要：CS2 启动时会删除并重建 console.log，那个瞬间的窗口期
+        # 如果只按 poll_interval（250ms）死循环重试，等于在高频撞击刚重建的
+        # 文件系统项。退避到 2s 上限后，撞击频率降到 1/8。
+        self._fail_delay = 0.0
+        self._backoff_max = 2.0
+
+        # 轮询间隔可由外部调整（前台是 CS2 时降频，见 foreground.py）。
+        # 用普通属性 + 简单锁，避免 watcher 线程读到半更新的值。
+        self._interval_lock = threading.Lock()
+
         # 统计
         self.stats = {
             "lines": 0,
@@ -144,6 +155,30 @@ class LogWatcher(threading.Thread):
     @property
     def current_offset(self) -> int:
         return self._offset
+
+    def set_poll_interval(self, seconds: float) -> None:
+        """运行期调整轮询间隔（线程安全）。
+
+        前台是 CS2 时会把间隔从 0.25s 提到 1.5s，减少文件系统活动；
+        切回桌面再恢复。这是消除「外部程序在游戏全屏时持续活动」的关键手段之一。
+        """
+        value = max(0.02, float(seconds))
+        with self._interval_lock:
+            self.poll_interval = value
+            # 间隔变小时，退避也应该跟着放开，否则恢复响应会慢一拍
+            if self._fail_delay and self._fail_delay > value:
+                self._fail_delay = value
+
+    def _current_interval(self) -> float:
+        with self._interval_lock:
+            return self.poll_interval
+
+    def _next_wait(self) -> float:
+        """本轮循环该睡多久：正常用轮询间隔，打开失败时用退避值。"""
+        interval = self._current_interval()
+        if self._fail_delay > 0:
+            return max(interval, self._fail_delay)
+        return interval
 
     def stop(self, timeout: float = 5.0) -> None:
         self._stop_event.set()
@@ -161,8 +196,8 @@ class LogWatcher(threading.Thread):
                 self.stats["errors"] += 1
                 self._emit_event({"type": "error", "stage": "poll", "error": str(exc)})
                 logger.exception("日志监听话轮出错")
-                self._stop_event.wait(min(self.poll_interval * 4, 2.0))
-            self._stop_event.wait(self.poll_interval)
+                self._stop_event.wait(min(self._current_interval() * 4, 2.0))
+            self._stop_event.wait(self._next_wait())
         self._close_file()
         self._emit_event({"type": "stopped", "stats": dict(self.stats)})
 
@@ -237,6 +272,18 @@ class LogWatcher(threading.Thread):
             self._process_chunk(chunk)
 
     # ------------------------------------------------------------------
+    def _bump_fail_delay(self) -> None:
+        """打开失败：按 2 倍递增退避，上限 _backoff_max（默认 2s）。"""
+        interval = self._current_interval()
+        if self._fail_delay <= 0:
+            self._fail_delay = interval
+        else:
+            self._fail_delay = min(self._fail_delay * 2, self._backoff_max)
+
+    def _reset_fail_delay(self) -> None:
+        """成功打开：退避归零，回到正常轮询节奏。"""
+        self._fail_delay = 0.0
+
     def _try_open(self, from_start: bool = False) -> None:
         try:
             # 只读 + 共享删除/写入：不阻止游戏侧重建或轮转日志
@@ -247,13 +294,16 @@ class LogWatcher(threading.Thread):
                 self._emit_event({"type": "waiting", "path": self.path})
             # 日志尚不存在：一旦出现（游戏首次启动），从头读取新内容
             self._force_from_start_next = True
+            self._bump_fail_delay()
             return
         except OSError as exc:
             self.stats["errors"] += 1
             self._emit_event({"type": "error", "stage": "open", "error": str(exc)})
+            self._bump_fail_delay()
             return
 
         self._waiting_emitted = False
+        self._reset_fail_delay()
         try:
             st = os.fstat(fh.fileno())
         except OSError:

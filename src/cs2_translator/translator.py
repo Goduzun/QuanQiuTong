@@ -313,7 +313,14 @@ class _BaseAITranslator:
         user_text: str,
         cache_key: str | None = None,
         use_cache: bool = True,
+        timeout: float | None = None,
     ) -> str:
+        """调用模型。
+
+        ``timeout`` 只给「启动自检」这类一次性调用用：传了它就临时建一个短超时
+        客户端，并且**不重试**（自检要尽快给结论，不是要做完整容错）。翻译主路径
+        仍然沿用 config.timeout_seconds 与 max_retries。
+        """
         if not user_text or not user_text.strip():
             raise TranslatorError("空消息，无需翻译", kind="empty")
 
@@ -323,14 +330,43 @@ class _BaseAITranslator:
                 self._bump(cache_hits=1)
                 return cached
 
+        short_client = None
+        if timeout is not None and timeout > 0:
+            short_client = make_client(self.config, self.api_key, timeout=timeout)
+            client = short_client
+            max_retries = 0
+        else:
+            client = self.client
+            max_retries = max(0, int(self.config.max_retries))
+
+        try:
+            return self._run_chat(
+                client, system_prompt, user_text, cache_key,
+                use_cache=use_cache, max_retries=max_retries,
+            )
+        finally:
+            if short_client is not None:
+                try:
+                    short_client.close()
+                except Exception:  # noqa: BLE001
+                    logger.debug("关闭临时客户端失败", exc_info=True)
+
+    def _run_chat(
+        self,
+        client,
+        system_prompt: str,
+        user_text: str,
+        cache_key: str | None,
+        use_cache: bool,
+        max_retries: int,
+    ) -> str:
         self._rate_gate.wait()
         started = time.monotonic()
         attempt = 0
-        max_retries = max(0, int(self.config.max_retries))
         while True:
             try:
                 self._bump(requests=1)
-                response = self.client.chat.completions.create(
+                response = client.chat.completions.create(
                     model=self.config.model,
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -409,7 +445,9 @@ class OpenAITranslator(_BaseAITranslator):
         source_language: str | None = None,
         term_hints=None,
         use_internal_cache: bool = True,
+        timeout: float | None = None,
     ) -> str:
+        """翻译。``timeout`` 只给启动自检用（见 _chat 说明）。"""
         text = self._check_text(text)
         cache_key = f"in|{self.config.model}|{self.config.api_base_url}|{text}"
         prompt = (
@@ -417,4 +455,5 @@ class OpenAITranslator(_BaseAITranslator):
             if not term_hints
             else _append_term_hints(INCOMING_SYSTEM_PROMPT, term_hints)
         )
-        return self._chat(prompt, text, cache_key, use_cache=use_internal_cache)
+        return self._chat(prompt, text, cache_key, use_cache=use_internal_cache,
+                          timeout=timeout)

@@ -214,3 +214,26 @@ def qapp():
 
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+# ---------------------------------------------------------------- 前台偵測隔離
+@pytest.fixture(autouse=True)
+def _isolate_foreground_detection(monkeypatch):
+    """讓前台偵測在測試中一律回報「目標進程不在前台」。
+
+    為什麼必須這樣：CS2 無響應修復加入了真實的 Win32 前台偵測
+    （GetForegroundWindow + QueryFullProcessImageNameW）。如果測試執行時
+    **使用者正好在玩 CS2**，MainWindow 一啟動就會判定「CS2 在前台」並暫停
+    UI 更新，導致自動滾動、訊息流等測試全部失敗 —— 測試結果會取決於當下
+    桌面上開著什麼程式，這種隨機性不可接受（實際就踩到了）。
+
+    需要「在前台」的測試自己用 monkeypatch 覆寫這個函式即可。
+    """
+    try:
+        from cs2_translator import foreground
+
+        monkeypatch.setattr(
+            foreground, "is_process_foreground", lambda names=None: False
+        )
+    except Exception:  # noqa: BLE001 - 匯入失敗不該擋測試
+        pass

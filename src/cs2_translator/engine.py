@@ -158,22 +158,53 @@ class TranslationEngine:
         self._status_thread.start()
         logger.info("引擎已启动 (v%s)，监听: %s", __version__, self.config.cs2_log_path)
 
+    def set_poll_interval(self, seconds: float) -> None:
+        """运行期调整日志轮询间隔（线程安全）。
+
+        前台是 CS2 时由 UI 层调到 1.5s：翻译延迟 1.5s 对聊天完全够用，
+        而文件系统活动降到原来的 1/6。
+        """
+        try:
+            self._watcher.set_poll_interval(seconds)
+        except Exception:
+            logger.exception("设置轮询间隔失败")
+
     def stop(self, timeout: float = 10.0) -> None:
+        """停止引擎。
+
+        ⚠ 这个方法会被 UI 线程调用（关窗口时），所以**每一步都必须有上限**。
+
+        真实事故：原本 watcher.stop(timeout) + queue.stop(timeout) 各等 10 秒，
+        再加 reply_pool.shutdown(wait=True) 与 join(2s)，最坏 22 秒阻塞 UI 线程。
+        Windows 对超过 5 秒不响应的窗口直接判 AppHang，事件日志留下
+        「程序全球通.exe 停止与 Windows 交互并已关闭」。
+        现在每一步都给短上限，且线程池不再等（回调线程都是 daemon）。
+        """
         if not self._running:
             return
         self._running = False
         self._status_stop.set()
-        self._watcher.stop(timeout=timeout)
-        self._queue.stop(timeout=timeout)
+        per_step = max(0.2, min(float(timeout), 1.5))
+        try:
+            self._watcher.stop(timeout=per_step)
+        except Exception:
+            logger.exception("停止日志监听失败")
+        try:
+            self._queue.stop(timeout=per_step)
+        except Exception:
+            logger.exception("停止翻译队列失败")
         for future in self._reply_futures:
             future.cancel()
         self._reply_futures.clear()
         try:
-            self._reply_pool.shutdown(wait=True, cancel_futures=True)
+            # wait=False：不为了等回调线程退出而卡住关闭流程。
+            # 这些线程是 daemon，进程退出时会自行结束，且关键数据
+            # （对局结束、记忆写入）在调用本方法之前已经落盘。
+            self._reply_pool.shutdown(wait=False, cancel_futures=True)
         except TypeError:  # Python < 3.9 兼容
-            self._reply_pool.shutdown(wait=True)
+            self._reply_pool.shutdown(wait=False)
         if self._status_thread:
-            self._status_thread.join(timeout=2.0)
+            self._status_thread.join(timeout=per_step)
         try:
             self.memory.close()
         except Exception:
@@ -707,10 +738,14 @@ class TranslationEngine:
             )
         return result
 
-    def test_api(self) -> tuple:
-        """测试翻译 API：翻译一条固定短句。返回 (成功?, 消息)。"""
+    def test_api(self, timeout: float | None = None) -> tuple:
+        """测试翻译 API：翻译一条固定短句。返回 (成功?, 消息)。
+
+        ``timeout`` 用于启动自检：传 5 秒就只用 5 秒（并且不重试），
+        不要沿用翻译主路径的 config.timeout_seconds（默认 20 秒）。
+        """
         try:
-            translated = self.translator.translate(SAMPLE_TRANSLATION_TEXT)
+            translated = self.translator.translate(SAMPLE_TRANSLATION_TEXT, timeout=timeout)
             self._api_state = "ok"
             return True, f"连接正常。测试译文: {translated}"
         except TranslatorError as exc:
