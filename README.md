@@ -16,7 +16,7 @@ No injection · No hooks · No memory reading · No game-file edits · **Trusted
 [![License](https://img.shields.io/badge/license-MIT-4ec9a0?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows-5aa9e6?style=flat-square)](#requirements)
 [![Python](https://img.shields.io/badge/python-3.11-e0b055?style=flat-square)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-431%20passed-4ec9a0?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-435%20passed-4ec9a0?style=flat-square)](#testing)
 
 [**English**](README.md) · [**简体中文**](README.zh-CN.md)
 
@@ -314,7 +314,7 @@ What the exclusions actually save (all verified by measurement):
 python -m pytest tests/ -q
 ```
 
-**431 tests**, covering log parsing, language detection, cache/lookup ordering, failure
+**435 tests**, covering log parsing, language detection, cache/lookup ordering, failure
 handling, match isolation, the reply state machine, glossary performance, and the
 packaging spec itself.
 

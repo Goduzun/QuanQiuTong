@@ -71,6 +71,14 @@ class EngineController(QObject):
         """调整日志轮询间隔（前台是 CS2 时降频）。"""
         self.engine.set_poll_interval(seconds)
 
+    def set_status_interval(self, seconds: float) -> None:
+        """调整状态推送间隔。
+
+        状态推送会驱动 MainWindow 的整套 UI 刷新，所以 CS2 在前台时必须降频，
+        否则「暂停 UI 刷新」只是停了自己的 QTimer，窗口照样每秒重绘 2 次。
+        """
+        self.engine.set_status_interval(seconds)
+
     # ---------------- 翻译记忆库 ----------------
     def memory_stats(self) -> dict:
         return self.engine.memory_stats()
@@ -111,7 +119,12 @@ class EngineController(QObject):
                 ok, message = self.engine.test_api(timeout=timeout)
             except Exception as exc:  # noqa: BLE001
                 ok, message = False, f"测试失败: {exc}"
-            self.signals.api_test_done.emit(ok, message)
+            try:
+                self.signals.api_test_done.emit(ok, message)
+            except RuntimeError:
+                # 窗口/信号对象已在关闭流程中销毁：结果没人接收，正常忽略。
+                # 不包这层会在控制台喷 "Signal source has been deleted" 堆栈。
+                logger.debug("API 测试结果到达时窗口已关闭，丢弃结果")
 
         threading.Thread(target=work, name="api-test", daemon=True).start()
 
@@ -121,6 +134,9 @@ class EngineController(QObject):
                 result = self.engine.test_log_read(path=path or None)
             except Exception as exc:  # noqa: BLE001
                 result = {"error": f"测试失败: {exc}", "exists": False}
-            self.signals.log_test_done.emit(result)
+            try:
+                self.signals.log_test_done.emit(result)
+            except RuntimeError:
+                logger.debug("日志测试结果到达时窗口已关闭，丢弃结果")
 
         threading.Thread(target=work, name="log-test", daemon=True).start()

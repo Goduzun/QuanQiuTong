@@ -105,6 +105,8 @@ class TranslationEngine:
 
         self._status_stop = threading.Event()
         self._status_thread = None
+        # 状态推送间隔：CS2 在前台时会被拉到 2 秒（见 _status_loop 说明）
+        self._status_interval = 0.5
         self._running = False
         self._last_incoming: ChatMessage | None = None
         self._counters = {"translated": 0, "failed": 0, "dropped": 0, "skipped": 0}
@@ -787,9 +789,25 @@ class TranslationEngine:
         }
 
     def _status_loop(self) -> None:
-        while not self._status_stop.wait(0.5):
+        """周期性推送状态。
+
+        ⚠ 这个循环会经信号直接驱动 UI 刷新，所以它的节奏必须可调。
+
+        真实事故：它固定每 0.5 秒发一次 status，MainWindow._on_status 收到就
+        调 _refresh_status() 做一整套窗口更新。结果是 —— 即便前台感知已经
+        停掉了状态列 QTimer，「每秒 2 次重绘」依然存在，CS2 全屏时照样被打断。
+        现在 CS2 在前台时把间隔拉到 2 秒，恢复到 0.5 秒。
+        """
+        while not self._status_stop.wait(self._status_interval):
             if self.on_status:
                 self._safe_call(self.on_status, self.status())
+
+    def set_status_interval(self, seconds: float) -> None:
+        """调整状态推送间隔（0.2 ~ 5 秒）。"""
+        try:
+            self._status_interval = max(0.2, min(float(seconds), 5.0))
+        except (TypeError, ValueError):
+            logger.exception("设置状态间隔失败")
 
     # ==================================================================
     # 内部工具

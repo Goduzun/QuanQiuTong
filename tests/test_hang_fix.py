@@ -353,6 +353,90 @@ class TestStatsCache:
 
 
 # ====================================================================
+# 引擎狀態推送降頻（「每秒 2 次重繪」的真正來源）
+# ====================================================================
+class TestStatusPushThrottling:
+    """引擎狀態推送必須在 CS2 前台時降頻。
+
+    真實事故（v1.2.5 發佈後實測）：前台感知只停了 MainWindow 自己的
+    _status_timer，但引擎執行緒每 0.5 秒推一次 status，_on_status 收到就做
+    整套 _refresh_status。結果「暫停 UI 刷新」等於沒做 —— 窗口仍每秒重繪 2 次，
+    CS2 照樣被判 AppHang（01:35:36 事件）。
+    修法：狀態推送降到 2 秒，且 _on_status 在前台期間完全不碰 UI。
+    """
+
+    @staticmethod
+    def _win(tmp_path):
+        from cs2_translator.config import ConfigManager
+        from cs2_translator.ui.main_window import MainWindow
+
+        cfg = AppConfig(cs2_log_path=str(tmp_path / "console.log"), api_key="sk",
+                        model="gpt-4o-mini", log_poll_interval=0.05)
+        win = MainWindow(cfg, ConfigManager(data_dir=tmp_path / "data"))
+        win.show()
+        win._switch_page("live")
+        return win
+
+    def test_engine_has_status_interval_setter(self):
+        from cs2_translator.engine import TranslationEngine
+        from cs2_translator.ui.workers import EngineController
+
+        for cls in (TranslationEngine, EngineController):
+            assert hasattr(cls, "set_status_interval"), f"{cls.__name__} 缺少介面"
+
+    def test_status_interval_is_clamped(self):
+        from cs2_translator.engine import TranslationEngine
+
+        class Dummy:
+            _status_interval = 0.5
+            set_status_interval = TranslationEngine.set_status_interval
+
+        d = Dummy()
+        TranslationEngine.set_status_interval(d, 99)
+        assert d._status_interval <= 5.0
+        TranslationEngine.set_status_interval(d, 0)
+        assert d._status_interval >= 0.2
+
+    def test_on_status_skips_ui_while_cs2_active(self, qapp, tmp_path):
+        """前台期間收到狀態推送，不得更新 UI。"""
+        win = self._win(tmp_path)
+        calls = []
+        try:
+            win._refresh_status = lambda *a, **k: calls.append(1)
+            win._cs2_active = False
+            win._on_status({"api_state": "ok"})
+            assert calls == [1], "正常情況應刷新"
+
+            win._cs2_active = True
+            win._pending_status_refresh = False
+            win._on_status({"api_state": "ok"})
+            assert calls == [1], "CS2 在前台時不得再刷新 UI"
+            assert win._pending_status_refresh is True, "應記下待補刷"
+        finally:
+            win._really_quit = True
+            win.close()
+
+    def test_foreground_switch_throttles_status_push(self, qapp, tmp_path, monkeypatch):
+        win = self._win(tmp_path)
+        seen = []
+        try:
+            monkeypatch.setattr(win.controller, "set_poll_interval", lambda v: None)
+            monkeypatch.setattr(win.controller, "set_status_interval",
+                                lambda v: seen.append(v))
+            win._cs2_active = False
+
+            win._on_cs2_foreground_changed(True)
+            assert seen[-1] == pytest.approx(win.CS2_ACTIVE_STATUS_INTERVAL)
+            assert win.CS2_ACTIVE_STATUS_INTERVAL >= 1.0, "必須明顯降頻"
+
+            win._on_cs2_foreground_changed(False)
+            assert seen[-1] == pytest.approx(0.5), "回到桌面應恢復 0.5 秒"
+        finally:
+            win._really_quit = True
+            win.close()
+
+
+# ====================================================================
 # 前台模式下暫停 UI 更新
 # ====================================================================
 class TestSuspendedUpdates:

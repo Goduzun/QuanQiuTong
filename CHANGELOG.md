@@ -13,6 +13,31 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## English
 
+### [1.2.6] — 2026-10-25
+
+**The 1.2.5 "pause UI updates" fix did not actually work.** Measured and fixed.
+
+#### Root cause of the remaining hang
+`engine._status_loop` pushes a status snapshot **every 0.5 s** on its own thread, and
+`MainWindow._on_status` turned each one into a full `_refresh_status()`. So while `cs2.exe`
+was in the foreground, stopping the UI's own 1 s timer changed nothing — the window still
+repainted ~1.9 times per second. That is why CS2 kept hanging (an AppHangB1 was still
+recorded at 01:35 on the 1.2.5 build).
+
+#### Fixed
+- **Status pushes are throttled while CS2 is in the foreground** (0.5 s → 2 s), and
+  `_on_status` no longer touches the UI at all in that state; one catch-up refresh runs
+  when you come back.
+- Late `api_test_done` / `log_test_done` results arriving after the window closed no longer
+  raise `RuntimeError: Signal source has been deleted`.
+
+#### Measured (offscreen, counting real calls)
+| Mode | UI refreshes | engine status pushes |
+|---|---|---|
+| normal | 3.00 /s | 1.88 /s |
+| CS2 foreground | **0.00 /s** | 0.50 /s |
+| back to desktop | 1 immediate catch-up | — |
+
 ### [1.2.5] — 2026-10-25
 
 Fixes for the reported **CS2 AppHangB1 / "not responding"** issue.
@@ -204,6 +229,30 @@ footprint, but CS2 hangs are not attributable to this app alone.
 
 ## 简体中文
 
+### [1.2.6] — 2026-10-25
+
+**1.2.5 的「暂停 UI 更新」其实没有真正生效。** 本次量测并修复。
+
+#### 残留卡顿的真正原因
+`engine._status_loop` 在自己的线程里**每 0.5 秒**推一次状态快照，
+`MainWindow._on_status` 每收到一次就做整套 `_refresh_status()`。
+所以当 `cs2.exe` 在前台时，只停掉 UI 自己的 1 秒 QTimer 根本没有用 ——
+窗口仍然每秒重绘约 1.9 次。这就是为什么 1.2.5 版本下 CS2 依旧卡顿
+（01:35 仍然记录了 AppHangB1）。
+
+#### 修复
+- **CS2 在前台时状态推送降频**（0.5 秒 → 2 秒），并且在这种状态下
+  `_on_status` 完全不碰 UI；回到桌面时补刷一次。
+- 窗口关闭后才到达的 `api_test_done` / `log_test_done` 结果，
+  不再抛出 `RuntimeError: Signal source has been deleted`。
+
+#### 实测（offscreen，统计真实调用次数）
+| 模式 | UI 刷新 | 引擎状态推送 |
+|---|---|---|
+| 正常 | 3.00 次/秒 | 1.88 次/秒 |
+| CS2 在前台 | **0.00 次/秒** | 0.50 次/秒 |
+| 切回桌面 | 立即补刷 1 次 | — |
+
 ### [1.2.5] — 2026-10-25
 
 修复反馈的 **CS2 AppHangB1 /「无响应」** 问题。
@@ -367,6 +416,7 @@ footprint, but CS2 hangs are not attributable to this app alone.
 
 ---
 
+[1.2.6]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.3...v1.2.5
 [1.2.3]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.1...v1.2.2

@@ -72,6 +72,9 @@ class MainWindow(QMainWindow):
     CS2_ACTIVE_POLL_INTERVAL = 1.5
     # 启动自检的 API 超时：不要沿用翻译的 20s
     STARTUP_API_TIMEOUT = 5.0
+    # CS2 在前台时，引擎状态推送间隔（默认 0.5s → 2s）。
+    # 状态推送会驱动整套 UI 刷新，是「每秒 2 次重绘」的真正来源。
+    CS2_ACTIVE_STATUS_INTERVAL = 2.0
 
     def __init__(self, config: AppConfig, config_manager: ConfigManager, parent=None,
                  instance_guard=None):
@@ -81,6 +84,8 @@ class MainWindow(QMainWindow):
         self._really_quit = False
         # 前台感知状态：True = CS2 在全屏/前台，需要降频并暂停非必要 UI 更新
         self._cs2_active = False
+        # CS2 在前台期间引擎推来的状态先存着，回到桌面补刷一次
+        self._pending_status_refresh = False
         # 缓存统计的 TTL 与快照。状态栏每秒刷新，但 memory_stats() 是一次 DB 查询，
         # 每秒查一次既浪费又是句柄数异常偏高的嫌疑来源之一。
         self._stats_cache: dict | None = None
@@ -175,14 +180,19 @@ class MainWindow(QMainWindow):
                 logger.info("CS2 进入前台：降频轮询并暂停 UI 刷新")
                 self._status_timer.stop()
                 self.controller.set_poll_interval(self.CS2_ACTIVE_POLL_INTERVAL)
+                # 关键：引擎线程每 0.5 秒推一次 status，不降频的话
+                # 「暂停 UI 刷新」只是停了自己的 QTimer，照样每秒重绘 2 次。
+                self.controller.set_status_interval(self.CS2_ACTIVE_STATUS_INTERVAL)
                 self.live_page.set_live_updates_suspended(True)
             else:
                 logger.info("CS2 离开前台：恢复正常轮询并补齐渲染")
                 self.controller.set_poll_interval(self.config.log_poll_interval)
+                self.controller.set_status_interval(0.5)
                 self.live_page.set_live_updates_suspended(False)
                 self.live_page.flush_suspended_updates()
                 self._invalidate_stats_cache()
                 self._status_timer.start()
+                self._pending_status_refresh = False
                 self._refresh_status()
         except Exception:
             logger.exception("切换前台模式失败")
@@ -608,7 +618,19 @@ class MainWindow(QMainWindow):
         self._refresh_status()
 
     def _on_status(self, status: dict) -> None:
+        """引擎状态回调（来自引擎线程，每 0.5 秒一次）。
+
+        ⚠ 这里才是「每秒 2 次重绘」的真正来源。
+
+        真实事故：前台感知原本只停了 _status_timer（UI 自己的 1 秒 QTimer），
+        但引擎线程每 0.5 秒推一次 status，收到就做整套 _refresh_status ——
+        暂停等于没做，CS2 全屏时窗口仍在每秒重绘 2 次，卡顿照旧（实测 01:35 复现）。
+        现在：CS2 在前台时只记录状态、不碰 UI，回到桌面补刷一次。
+        """
         self._last_status = status
+        if self._cs2_active:
+            self._pending_status_refresh = True
+            return
         self._refresh_status(status)
 
     def _on_log_event(self, event: dict) -> None:
