@@ -1,4 +1,4 @@
-﻿# Changelog · 更新日志
+# Changelog · 更新日志
 
 All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
@@ -37,6 +37,12 @@ recorded at 01:35 on the 1.2.5 build).
 | normal | 3.00 /s | 1.88 /s |
 | CS2 foreground | **0.00 /s** | 0.50 /s |
 | back to desktop | 1 immediate catch-up | — |
+
+#### ✅ Confirmed fixed in a real play session
+The reporter played a full-screen session on this build and confirmed the stutter is gone.
+This is the first release in the series where the fix was validated against real gameplay
+rather than only against measurements — 1.2.5 had already claimed a fix and had not
+actually stopped the repaints.
 
 ### [1.2.5] — 2026-10-25
 
@@ -252,6 +258,11 @@ footprint, but CS2 hangs are not attributable to this app alone.
 | 正常 | 3.00 次/秒 | 1.88 次/秒 |
 | CS2 在前台 | **0.00 次/秒** | 0.50 次/秒 |
 | 切回桌面 | 立即补刷 1 次 | — |
+
+#### ✅ 已由真实游玩确认修复
+使用者用此版本打了一整局全屏，确认不再卡顿。
+这是本系列**第一个拿真实对局验证过**的版本 —— 1.2.5 当初也声称修好了，
+但实际上并没有真正停掉重绘。
 
 ### [1.2.5] — 2026-10-25
 
