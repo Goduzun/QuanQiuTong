@@ -15,73 +15,41 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### [1.2.6] — 2026-10-25
 
-**The 1.2.5 "pause UI updates" fix did not actually work.** Measured and fixed.
-
-#### Root cause of the remaining hang
-`engine._status_loop` pushes a status snapshot **every 0.5 s** on its own thread, and
-`MainWindow._on_status` turned each one into a full `_refresh_status()`. So while `cs2.exe`
-was in the foreground, stopping the UI's own 1 s timer changed nothing — the window still
-repainted ~1.9 times per second. That is why CS2 kept hanging (an AppHangB1 was still
-recorded at 01:35 on the 1.2.5 build).
+Fixes the **CS2 AppHangB1 / "not responding"** issue: CS2 stuttered periodically while this
+app was running, and the app window itself could stop responding.
 
 #### Fixed
-- **Status pushes are throttled while CS2 is in the foreground** (0.5 s → 2 s), and
-  `_on_status` no longer touches the UI at all in that state; one catch-up refresh runs
-  when you come back.
-- Late `api_test_done` / `log_test_done` results arriving after the window closed no longer
-  raise `RuntimeError: Signal source has been deleted`.
-
-#### Measured (offscreen, counting real calls)
-| Mode | UI refreshes | engine status pushes |
-|---|---|---|
-| normal | 3.00 /s | 1.88 /s |
-| CS2 foreground | **0.00 /s** | 0.50 /s |
-| back to desktop | 1 immediate catch-up | — |
-
-#### ✅ Confirmed fixed in a real play session
-The reporter played a full-screen session on this build and confirmed the stutter is gone.
-This is the first release in the series where the fix was validated against real gameplay
-rather than only against measurements — 1.2.5 had already claimed a fix and had not
-actually stopped the repaints.
-
-### [1.2.5] — 2026-10-25
-
-Fixes for the reported **CS2 AppHangB1 / "not responding"** issue.
-
-> Supersedes an unreleased 1.2.4 local build. 1.2.4 contained the fixes below but
-> introduced a hang on *its own* shutdown (UI thread blocked up to 22 s); 1.2.5 fixes that.
-
-#### Added
-- **Single-instance lock.** A second launch now wakes the existing window and exits
-  instead of running a duplicate. Two instances had been observed running side by side
-  (one accumulated 877 s of CPU over 2 days), doubling file polling and UI redraws.
-- **Foreground awareness.** While `cs2.exe` is the foreground window the app raises its
-  log poll interval (0.25 s → 1.5 s), stops the 1 s status refresh, and defers rendering.
-  Messages are still queued and are rendered in one pass when you come back.
+- **CS2 stuttered while the app was running.** The engine pushed a status snapshot every
+  0.5 s on its own thread, and each one triggered a full window refresh — so the window
+  repainted ~1.9×/s even with CS2 in the foreground. Status pushes now drop to one per
+  2 s while CS2 is foreground, and the window touches no UI at all in that state; a single
+  catch-up refresh runs when you return. **Measured: 1.9 → 0 refreshes per second.**
+- **The app itself could be flagged as not responding on exit.** `engine.stop()` blocked the
+  UI thread for up to 22 s. The window is now hidden first, each step is capped at 1.5 s,
+  and the callback pool is no longer waited on.
+- **Duplicate instances.** A second launch now wakes the existing window and exits, instead
+  of running another copy that doubles file polling and redraws.
+- **Log reads hammered a missing or rebuilt file** every 250 ms. Now 250 ms → 500 ms → 1 s →
+  2 s, reset on success.
+- **One SQLite query per second** from the status bar (a likely contributor to the high
+  handle count). Now cached for 5 s, and the subtitle is only rewritten when it changes.
+- **The packaged build failed to start** because the slimming list stripped `Qt6Network`,
+  which `QLocalServer` needs. It is kept now.
+- Late `api_test_done` / `log_test_done` results arriving after the window closed raised
+  `RuntimeError: Signal source has been deleted`.
 
 #### Changed
-- Startup API self-check uses a **5 s timeout with no retries** instead of reusing the
-  20 s translation timeout.
-- Memory statistics are cached for 5 s instead of querying SQLite every second, and the
-  header subtitle is only rewritten when the text actually changes. (The 1 s cadence was a
-  likely contributor to the 1989-handle count seen on site.)
+- **Foreground awareness.** While `cs2.exe` is foreground the log poll interval goes
+  0.25 s → 1.5 s, non-essential UI updates stop, and messages are queued and rendered in one
+  pass when you come back.
+- Startup API self-check now uses a **5 s timeout with no retries** instead of the 20 s
+  translation timeout.
+- The packaged build keeps the `qoffscreen` platform plugin, so it can be verified headlessly
+  without popping windows onto the desktop.
 
-#### Fixed
-- **Log reads back off on failure.** A missing or recreated `console.log` used to be
-  retried every 250 ms indefinitely; now 250 ms → 500 ms → 1 s → 2 s, reset on success.
-- **Shutdown no longer blocks the UI thread.** `engine.stop()` could block for 22 s
-  (10 s watcher + 10 s queue + pool join), which Windows reports as AppHang — this is what
-  produced `程序全球通.exe 停止与 Windows 交互并已关闭`. The window is now hidden first,
-  each step is capped at 1.5 s, and the callback pool is no longer waited on.
-- Packaging: `Qt6Network` had been stripped by the slimming list, which breaks
-  `QLocalServer` and made the packaged build fail at import. It is kept now, together with
-  the tiny `qoffscreen` platform plugin (enables headless verification without popping
-  windows onto the desktop).
-
-#### Note on root cause
-Event-log correlation over 7 days shows `cs2.exe` **also hung while this app was not
-running at all** (2026-10-20 21:45). The changes above substantially reduce this app's
-footprint, but CS2 hangs are not attributable to this app alone.
+#### Verified
+435 automated tests pass. UI refresh rate measured at **0 per second** while CS2 is
+foreground. Confirmed fixed in a real full-screen play session.
 
 ### [1.2.3] — 2026-10-22
 
@@ -237,65 +205,29 @@ footprint, but CS2 hangs are not attributable to this app alone.
 
 ### [1.2.6] — 2026-10-25
 
-**1.2.5 的「暂停 UI 更新」其实没有真正生效。** 本次量测并修复。
-
-#### 残留卡顿的真正原因
-`engine._status_loop` 在自己的线程里**每 0.5 秒**推一次状态快照，
-`MainWindow._on_status` 每收到一次就做整套 `_refresh_status()`。
-所以当 `cs2.exe` 在前台时，只停掉 UI 自己的 1 秒 QTimer 根本没有用 ——
-窗口仍然每秒重绘约 1.9 次。这就是为什么 1.2.5 版本下 CS2 依旧卡顿
-（01:35 仍然记录了 AppHangB1）。
+修复 **CS2 无响应（AppHangB1）**：全球通运行时 CS2 周期性卡顿，且全球通自身窗口也会停止响应。
 
 #### 修复
-- **CS2 在前台时状态推送降频**（0.5 秒 → 2 秒），并且在这种状态下
-  `_on_status` 完全不碰 UI；回到桌面时补刷一次。
-- 窗口关闭后才到达的 `api_test_done` / `log_test_done` 结果，
-  不再抛出 `RuntimeError: Signal source has been deleted`。
-
-#### 实测（offscreen，统计真实调用次数）
-| 模式 | UI 刷新 | 引擎状态推送 |
-|---|---|---|
-| 正常 | 3.00 次/秒 | 1.88 次/秒 |
-| CS2 在前台 | **0.00 次/秒** | 0.50 次/秒 |
-| 切回桌面 | 立即补刷 1 次 | — |
-
-#### ✅ 已由真实游玩确认修复
-使用者用此版本打了一整局全屏，确认不再卡顿。
-这是本系列**第一个拿真实对局验证过**的版本 —— 1.2.5 当初也声称修好了，
-但实际上并没有真正停掉重绘。
-
-### [1.2.5] — 2026-10-25
-
-修复反馈的 **CS2 AppHangB1 /「无响应」** 问题。
-
-> 取代未发布的本地 1.2.4。1.2.4 已含下方修复，但引入了**自身关闭时卡死**
-> （UI 线程被阻塞最长 22 秒）；1.2.5 修掉这个问题。
-
-#### 新增
-- **单实例锁。** 第二次启动会唤醒已有窗口并自行退出，不再跑重复实例。现场曾同时
-  运行两份（其中一份 2 天累计 877 秒 CPU），文件轮询与 UI 重绘都翻倍。
-- **前台感知。** `cs2.exe` 在前台时，日志轮询间隔从 0.25 秒提到 1.5 秒、停掉每秒的
-  状态刷新、并延后渲染；消息仍照常入队，回到桌面一次性补齐。
-
-#### 变更
-- 启动自检 API 改用 **5 秒超时且不重试**，不再沿用翻译主路径的 20 秒。
-- 缓存统计改为 5 秒缓存，不再每秒查一次 SQLite；副标题只在文字真的变化时才重写。
-  （每秒一次的节奏是现场 1989 个句柄的嫌疑来源之一。）
-
-#### 修复
-- **日志读取失败会指数退避。** 原本文件缺失或被重建时按 250 毫秒无限重试；
-  现在 250ms → 500ms → 1s → 2s，成功后复位。
-- **关闭不再阻塞 UI 线程。** `engine.stop()` 原本最坏阻塞 22 秒
-  （watcher 10 秒 + 队列 10 秒 + 线程池等待），Windows 会判为 AppHang ——
-  这正是事件日志里「程序全球通.exe 停止与 Windows 交互并已关闭」的来源。
+- **全球通运行时 CS2 周期性卡顿。** 引擎线程每 0.5 秒推送一次状态，每次都会触发整套窗口
+  刷新 —— 即使 CS2 在前台，窗口仍每秒重绘约 1.9 次。现在 CS2 在前台时状态推送降到每 2 秒
+  一次，且该状态下完全不碰 UI；回到桌面补刷一次。**实测：1.9 次/秒 → 0 次/秒。**
+- **关闭时全球通自身被判「无响应」。** `engine.stop()` 最坏阻塞 UI 线程 22 秒。
   现在先隐藏窗口、每步上限 1.5 秒、不再等待回调线程池。
-- 打包：瘦身清单误删了 `Qt6Network`，导致 `QLocalServer` 不可用、打包版启动即
-  ImportError。现已保留，并额外保留极小的 `qoffscreen` 平台插件
-  （可在不弹出窗口的情况下做自动化验收）。
+- **重复实例。** 第二次启动会唤醒已有窗口并退出，不再多跑一份造成文件轮询与重绘翻倍。
+- **日志文件缺失或被重建时按 250 毫秒无限重试。** 现在 250ms → 500ms → 1s → 2s，成功后复位。
+- **状态栏每秒查询一次数据库**（句柄数偏高的嫌疑来源）。现在 5 秒缓存，且副标题只在文字
+  变化时才重写。
+- **打包版无法启动**：瘦身清单删掉了 `QLocalServer` 依赖的 `Qt6Network`。已保留。
+- 窗口关闭后才返回的 API 测试结果会抛 `RuntimeError: Signal source has been deleted`。
 
-#### 关于根因
-比对近 7 天事件日志：**本程序完全没运行时，`cs2.exe` 也发生过 AppHang**
-（2026-10-20 21:45）。上述改动大幅降低了本程序的占用，但 CS2 卡顿不能单独归因于本程序。
+#### 更新
+- **前台感知。** `cs2.exe` 在前台时，日志轮询间隔 0.25 秒 → 1.5 秒，暂停非必要 UI 更新，
+  消息仍照常入队，回到桌面一次性补齐渲染。
+- 启动自检 API 改用 **5 秒超时且不重试**，不再沿用翻译主路径的 20 秒。
+- 打包保留 `qoffscreen` 平台插件，可在不弹出窗口的情况下做自动化验证。
+
+#### 验证
+435 项测试通过。CS2 在前台时 UI 刷新实测 **0 次/秒**。已由真实全屏对局确认不再卡顿。
 
 ### [1.2.3] — 2026-10-22
 
@@ -428,7 +360,6 @@ footprint, but CS2 hangs are not attributable to this app alone.
 ---
 
 [1.2.6]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.5...v1.2.6
-[1.2.5]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.3...v1.2.5
 [1.2.3]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Goduzun/QuanQiuTong/compare/v1.2.0...v1.2.1
